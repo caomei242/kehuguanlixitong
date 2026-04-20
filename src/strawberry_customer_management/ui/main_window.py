@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -14,7 +15,9 @@ from PySide6.QtWidgets import (
     QMainWindow,
 )
 
+from strawberry_customer_management.ai_capture import AICaptureError, MiniMaxCaptureClient
 from strawberry_customer_management.config import ConfigStore
+from strawberry_customer_management.config import resolved_minimax_api_key
 from strawberry_customer_management.markdown_store import MarkdownCustomerStore
 from strawberry_customer_management.models import CustomerDraft
 from strawberry_customer_management.ui.app_icon import load_app_icon
@@ -47,6 +50,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.settings_page)
 
         self.overview_page.customer_selected.connect(self._show_customer)
+        self.quick_capture_page.ai_extract_requested.connect(self._handle_ai_extract)
         self.quick_capture_page.save_requested.connect(self._handle_capture_save)
         self.settings_page.save_requested.connect(self._handle_settings_save)
         self.settings_page.refresh_requested.connect(self._handle_settings_refresh)
@@ -98,7 +102,13 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(shell)
         self.setCentralWidget(root)
 
-        self.settings_page.set_values(self._config["customer_root"], self._config["main_work_root"])
+        self.settings_page.set_values(
+            self._config["customer_root"],
+            self._config["main_work_root"],
+            self._config.get("minimax_api_key", ""),
+            self._config.get("minimax_model", ""),
+            self._config.get("minimax_base_url", ""),
+        )
         self.nav.setCurrentRow(0)
         self._reload_customers()
 
@@ -125,6 +135,35 @@ class MainWindow(QMainWindow):
         self.quick_capture_page.set_status(f"{detail.name} 已写入 Obsidian 客户管理工作台。")
         self.nav.setCurrentRow(0)
 
+    def _handle_ai_extract(self, raw_text: str) -> None:
+        if not raw_text:
+            QMessageBox.warning(self, "缺少客户原文", "请先粘贴客户聊天、需求或推进情况。")
+            return
+        api_key = resolved_minimax_api_key(self._config)
+        if not api_key:
+            QMessageBox.warning(self, "缺少 MiniMax Key", "请先在设置页填写 MiniMax API Key，或设置 MINIMAX_API_KEY 环境变量。")
+            self.nav.setCurrentRow(2)
+            return
+        client = MiniMaxCaptureClient(
+            api_key=api_key,
+            model=str(self._config.get("minimax_model", "")),
+            base_url=str(self._config.get("minimax_base_url", "")),
+        )
+        existing_customers = [record.name for record in self._store.list_customers()]
+        self.quick_capture_page.set_ai_busy(True)
+        self.quick_capture_page.set_status("正在用 MiniMax 整理客户信息...")
+        QApplication.processEvents()
+        try:
+            draft = client.extract_draft(raw_text, existing_customers=existing_customers)
+        except AICaptureError as exc:
+            QMessageBox.warning(self, "AI 整理失败", str(exc))
+            self.quick_capture_page.set_status("AI 整理失败，可以修改原文后重试，或继续手动填写。")
+            return
+        finally:
+            self.quick_capture_page.set_ai_busy(False)
+        self.quick_capture_page.apply_draft(draft)
+        self.quick_capture_page.set_status("AI 已整理到表单。请确认字段后，再保存并更新客户。")
+
     def _handle_settings_save(self, payload: dict[str, str]) -> None:
         self._config.update(payload)
         self._config_store.save(self._config)
@@ -139,9 +178,10 @@ class MainWindow(QMainWindow):
     def _handle_settings_validate(self) -> None:
         customer_root = Path(self.settings_page.customer_root_edit.text().strip())
         main_work_root = Path(self.settings_page.main_work_root_edit.text().strip())
+        current_minimax_key = self.settings_page.minimax_api_key_edit.text().strip() or resolved_minimax_api_key(self._config)
         messages = [
             f"客户管理路径：{'存在' if customer_root.exists() else '不存在'}",
             f"主业文件根路径：{'存在' if main_work_root.exists() else '不存在'}",
+            f"MiniMax Key：{'已配置' if current_minimax_key else '未配置'}",
         ]
         self.settings_page.set_status("；".join(messages))
-

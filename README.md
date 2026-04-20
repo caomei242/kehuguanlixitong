@@ -15,6 +15,13 @@
 PYTHONPATH=src python3 -m strawberry_customer_management.app
 ```
 
+## AI 快速整理
+
+- 快速录入页支持先粘贴客户聊天、需求或推进原文，再点击 `AI 整理到表单`。
+- AI 只负责填充表单字段；写入 Obsidian 前仍需要人工确认并点击 `保存并更新客户`。
+- 当前接入 MiniMax OpenAI 兼容接口，默认 Base URL：`https://api.minimax.io/v1`
+- MiniMax API Key 只保存在本机用户配置，或通过环境变量 `MINIMAX_API_KEY` 读取；不要写入仓库、README 或 `.env` 提交。
+
 ## 测试
 
 ```bash

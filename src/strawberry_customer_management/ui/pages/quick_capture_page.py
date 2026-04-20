@@ -21,6 +21,7 @@ from strawberry_customer_management.models import CommunicationEntry, CustomerDr
 
 class QuickCapturePage(QWidget):
     save_requested = Signal(object)
+    ai_extract_requested = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -31,8 +32,24 @@ class QuickCapturePage(QWidget):
 
         header = QLabel("快速录入")
         header.setObjectName("SectionTitle")
-        hint = QLabel("把新客户或最新沟通快速结构化，保存后自动更新客户页和总表。")
+        hint = QLabel("先粘贴客户聊天或需求原文，AI 整理到表单后，你确认再保存。")
         hint.setObjectName("SectionHint")
+
+        raw_card = QFrame()
+        raw_card.setObjectName("CardFrame")
+        raw_layout = QVBoxLayout(raw_card)
+        raw_layout.setContentsMargins(18, 18, 18, 18)
+        raw_layout.setSpacing(10)
+        raw_label = QLabel("客户原文")
+        raw_label.setObjectName("SectionHint")
+        self.raw_text_edit = QTextEdit()
+        self.raw_text_edit.setPlaceholderText("直接粘贴客户名、聊天记录、需求描述或推进情况，AI 会帮你整理成下面的字段。")
+        self.raw_text_edit.setFixedHeight(112)
+        self.ai_extract_button = QPushButton("AI 整理到表单")
+        self.ai_extract_button.clicked.connect(self._emit_ai_extract_requested)
+        raw_layout.addWidget(raw_label)
+        raw_layout.addWidget(self.raw_text_edit)
+        raw_layout.addWidget(self.ai_extract_button)
 
         card = QFrame()
         card.setObjectName("CardFrame")
@@ -95,6 +112,7 @@ class QuickCapturePage(QWidget):
 
         root.addWidget(header)
         root.addWidget(hint)
+        root.addWidget(raw_card)
         root.addWidget(card, 1)
         root.addLayout(actions)
         root.addWidget(self.status_label)
@@ -103,6 +121,7 @@ class QuickCapturePage(QWidget):
         self.status_label.setText(text)
 
     def clear_form(self) -> None:
+        self.raw_text_edit.clear()
         self.name_edit.clear()
         self.business_edit.clear()
         self.contact_edit.clear()
@@ -116,6 +135,31 @@ class QuickCapturePage(QWidget):
         self.new_info_edit.clear()
         self.risk_edit.clear()
         self.next_step_edit.clear()
+
+    def apply_draft(self, draft: CustomerDraft) -> None:
+        self.name_edit.setText(draft.name)
+        self.type_combo.setCurrentText(draft.customer_type)
+        self.stage_combo.setCurrentText(draft.stage)
+        self.business_edit.setText(draft.business_direction)
+        self.contact_edit.setText(draft.contact)
+        self.company_edit.setText(draft.company)
+        self.shop_scale_edit.setText(draft.shop_scale)
+        self.need_edit.setPlainText(draft.current_need)
+        self.progress_edit.setText(draft.recent_progress)
+        self.next_action_edit.setText(draft.next_action)
+        if draft.communication:
+            self.communication_date_edit.setText(draft.communication.entry_date)
+            self.summary_edit.setPlainText(draft.communication.summary)
+            self.new_info_edit.setPlainText(draft.communication.new_info)
+            self.risk_edit.setPlainText(draft.communication.risk)
+            self.next_step_edit.setPlainText(draft.communication.next_step)
+
+    def set_ai_busy(self, busy: bool) -> None:
+        self.ai_extract_button.setEnabled(not busy)
+        self.ai_extract_button.setText("AI 整理中..." if busy else "AI 整理到表单")
+
+    def _emit_ai_extract_requested(self) -> None:
+        self.ai_extract_requested.emit(self.raw_text_edit.toPlainText().strip())
 
     def _emit_save_requested(self) -> None:
         communication = CommunicationEntry(
@@ -139,4 +183,3 @@ class QuickCapturePage(QWidget):
             communication=communication,
         )
         self.save_requested.emit(draft)
-

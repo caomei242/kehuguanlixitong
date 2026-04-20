@@ -67,7 +67,7 @@ static void launch_python_app(void) {
 }
 
 int main(void) {
-    int running = system("pgrep -f 'python.*strawberry_customer_management\\.app' >/dev/null 2>&1");
+    int running = system("pgrep -if 'python.*strawberry_customer_management\\.app' >/dev/null 2>&1");
     write_log("main running_check=%d", running);
     if (running == 0) {
         activate_python_app();

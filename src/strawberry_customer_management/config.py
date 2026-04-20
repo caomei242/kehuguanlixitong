@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
+
+from strawberry_customer_management.ai_capture import MINIMAX_BASE_URL, MINIMAX_DEFAULT_MODEL
 
 from strawberry_customer_management.paths import default_customer_root, default_main_work_root
 
@@ -33,9 +36,16 @@ def default_config() -> dict[str, Any]:
     return {
         "customer_root": str(default_customer_root()),
         "main_work_root": str(default_main_work_root()),
+        "ai_provider": "minimax",
+        "minimax_api_key": "",
+        "minimax_model": MINIMAX_DEFAULT_MODEL,
+        "minimax_base_url": MINIMAX_BASE_URL,
     }
 
 
 def default_config_path() -> Path:
     return Path.home() / ".config" / "strawberry-customer-management" / "config.json"
 
+
+def resolved_minimax_api_key(config: dict[str, Any]) -> str:
+    return os.environ.get("MINIMAX_API_KEY", "").strip() or str(config.get("minimax_api_key", "")).strip()

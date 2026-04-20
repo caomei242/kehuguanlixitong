@@ -38,8 +38,15 @@ class SettingsPage(QWidget):
 
         self.customer_root_edit = QLineEdit()
         self.main_work_root_edit = QLineEdit()
+        self.minimax_api_key_edit = QLineEdit()
+        self.minimax_api_key_edit.setEchoMode(QLineEdit.Password)
+        self.minimax_model_edit = QLineEdit()
+        self.minimax_base_url_edit = QLineEdit()
         form.addRow("客户管理根路径", self.customer_root_edit)
         form.addRow("主业文件根路径", self.main_work_root_edit)
+        form.addRow("MiniMax API Key", self.minimax_api_key_edit)
+        form.addRow("MiniMax 模型", self.minimax_model_edit)
+        form.addRow("MiniMax Base URL", self.minimax_base_url_edit)
 
         actions = QHBoxLayout()
         actions.setSpacing(10)
@@ -66,9 +73,19 @@ class SettingsPage(QWidget):
         root.addWidget(self.status_label)
         root.addStretch(1)
 
-    def set_values(self, customer_root: str, main_work_root: str) -> None:
+    def set_values(
+        self,
+        customer_root: str,
+        main_work_root: str,
+        minimax_api_key: str = "",
+        minimax_model: str = "",
+        minimax_base_url: str = "",
+    ) -> None:
         self.customer_root_edit.setText(customer_root)
         self.main_work_root_edit.setText(main_work_root)
+        self.minimax_api_key_edit.setText(minimax_api_key)
+        self.minimax_model_edit.setText(minimax_model)
+        self.minimax_base_url_edit.setText(minimax_base_url)
 
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
@@ -78,6 +95,9 @@ class SettingsPage(QWidget):
             {
                 "customer_root": self.customer_root_edit.text().strip(),
                 "main_work_root": self.main_work_root_edit.text().strip(),
+                "ai_provider": "minimax",
+                "minimax_api_key": self.minimax_api_key_edit.text().strip(),
+                "minimax_model": self.minimax_model_edit.text().strip(),
+                "minimax_base_url": self.minimax_base_url_edit.text().strip(),
             }
         )
-
