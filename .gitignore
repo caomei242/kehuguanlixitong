@@ -1,0 +1,14 @@
+.DS_Store
+.pytest_cache/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.swp
+dist/
+build/
+*.egg-info/
+.idea/
+.vscode/
+*.app/Contents/MacOS/*.dSYM/
+
