@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QPushButton,
+    QScrollArea,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -19,11 +21,22 @@ from strawberry_customer_management.models import CustomerDetail, CustomerRecord
 
 class OverviewPage(QWidget):
     customer_selected = Signal(str)
+    update_customer_requested = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
 
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("PageScrollArea")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        self.scroll_area.setWidget(content)
+        outer.addWidget(self.scroll_area)
+
+        root = QVBoxLayout(content)
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(16)
 
@@ -67,9 +80,17 @@ class OverviewPage(QWidget):
         detail_layout.setSpacing(10)
         detail_title = QLabel("客户详情")
         detail_title.setObjectName("SectionTitle")
+        self.ai_update_button = QPushButton("AI 更新此客户")
+        self.ai_update_button.setObjectName("SecondaryActionButton")
+        self.ai_update_button.setEnabled(False)
+        self.ai_update_button.clicked.connect(self._emit_update_current_customer)
+        detail_header = QHBoxLayout()
+        detail_header.addWidget(detail_title)
+        detail_header.addStretch(1)
+        detail_header.addWidget(self.ai_update_button)
         self.detail_browser = QTextBrowser()
         self.detail_browser.setOpenExternalLinks(False)
-        detail_layout.addWidget(detail_title)
+        detail_layout.addLayout(detail_header)
         detail_layout.addWidget(self.detail_browser, 1)
 
         body.addWidget(list_card, 1)
@@ -79,6 +100,7 @@ class OverviewPage(QWidget):
         root.addLayout(body, 1)
 
         self._records: list[CustomerRecord] = []
+        self._current_customer_name = ""
 
     def set_focus_customers(self, records: list[CustomerRecord]) -> None:
         while self.focus_items_layout.count():
@@ -116,8 +138,12 @@ class OverviewPage(QWidget):
 
     def show_customer_detail(self, detail: CustomerDetail | None) -> None:
         if detail is None:
+            self._current_customer_name = ""
+            self.ai_update_button.setEnabled(False)
             self.detail_browser.setHtml("<p>请选择客户。</p>")
             return
+        self._current_customer_name = detail.name
+        self.ai_update_button.setEnabled(True)
         communication_html = "".join(
             (
                 f"<h4>{escape(entry.entry_date)}</h4>"
@@ -154,3 +180,6 @@ class OverviewPage(QWidget):
         if name:
             self.customer_selected.emit(str(name))
 
+    def _emit_update_current_customer(self) -> None:
+        if self._current_customer_name:
+            self.update_customer_requested.emit(self._current_customer_name)

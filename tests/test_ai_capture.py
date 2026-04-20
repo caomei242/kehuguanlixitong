@@ -113,9 +113,38 @@ def test_minimax_extracts_json_from_markdown_code_fence():
     assert draft.communication.new_info == ""
 
 
+def test_minimax_target_customer_name_is_prompted_and_forced():
+    transport = FakeMiniMaxTransport(
+        minimax_response(
+            json.dumps(
+                {
+                    "客户名称": "爱慕客户",
+                    "客户类型": "品牌客户",
+                    "阶段": "沟通中",
+                    "当前需求": "补充品牌推广需求",
+                    "沟通日期": "2026-04-20",
+                    "沟通结论": "客户补充了推广方向",
+                },
+                ensure_ascii=False,
+            )
+        )
+    )
+    client = MiniMaxCaptureClient(api_key="test-key", transport=transport)
+
+    draft = client.extract_draft(
+        "这个是爱慕的老客户更新，补充品牌推广需求",
+        existing_customers=["爱慕"],
+        today="2026-04-20",
+        target_customer_name="爱慕",
+    )
+
+    user_prompt = transport.requests[0]["payload"]["messages"][1]["content"]
+    assert "当前正在更新的老客户：爱慕" in user_prompt
+    assert draft.name == "爱慕"
+
+
 def test_minimax_requires_api_key_before_requesting():
     client = MiniMaxCaptureClient(api_key="", transport=FakeMiniMaxTransport(minimax_response("{}")))
 
     with pytest.raises(AICaptureError, match="MiniMax API Key"):
         client.extract_draft("云舟店群想问批量折扣", existing_customers=[], today="2026-04-20")
-

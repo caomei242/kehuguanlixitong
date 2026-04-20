@@ -11,29 +11,44 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from strawberry_customer_management.models import CommunicationEntry, CustomerDraft, CUSTOMER_STAGES, CUSTOMER_TYPES
+from strawberry_customer_management.models import CommunicationEntry, CustomerDetail, CustomerDraft, CUSTOMER_STAGES, CUSTOMER_TYPES
 
 
 class QuickCapturePage(QWidget):
     save_requested = Signal(object)
-    ai_extract_requested = Signal(str)
+    ai_extract_requested = Signal(str, str)
 
     def __init__(self) -> None:
         super().__init__()
 
-        root = QVBoxLayout(self)
+        self.target_customer_name = ""
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("PageScrollArea")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        self.scroll_area.setWidget(content)
+        outer.addWidget(self.scroll_area)
+
+        root = QVBoxLayout(content)
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(16)
 
         header = QLabel("快速录入")
         header.setObjectName("SectionTitle")
-        hint = QLabel("先粘贴客户聊天或需求原文，AI 整理到表单后，你确认再保存。")
+        hint = QLabel("新客户和老客户更新都可以粘贴原文，AI 整理到表单后，你确认再保存。")
         hint.setObjectName("SectionHint")
+        self.target_context_label = QLabel("当前模式：通用录入")
+        self.target_context_label.setObjectName("SectionHint")
 
         raw_card = QFrame()
         raw_card.setObjectName("CardFrame")
@@ -112,6 +127,7 @@ class QuickCapturePage(QWidget):
 
         root.addWidget(header)
         root.addWidget(hint)
+        root.addWidget(self.target_context_label)
         root.addWidget(raw_card)
         root.addWidget(card, 1)
         root.addLayout(actions)
@@ -121,6 +137,7 @@ class QuickCapturePage(QWidget):
         self.status_label.setText(text)
 
     def clear_form(self) -> None:
+        self.clear_target_customer()
         self.raw_text_edit.clear()
         self.name_edit.clear()
         self.business_edit.clear()
@@ -154,12 +171,44 @@ class QuickCapturePage(QWidget):
             self.risk_edit.setPlainText(draft.communication.risk)
             self.next_step_edit.setPlainText(draft.communication.next_step)
 
+    def prepare_existing_customer_update(self, detail: CustomerDetail) -> None:
+        self.set_target_customer(detail.name)
+        self.apply_draft(
+            CustomerDraft(
+                name=detail.name,
+                customer_type=detail.customer_type or CUSTOMER_TYPES[0],
+                stage=detail.stage or CUSTOMER_STAGES[0],
+                business_direction=detail.business_direction,
+                contact=detail.contact,
+                company=detail.company,
+                shop_scale=detail.shop_scale,
+                current_need=detail.current_need,
+                recent_progress=detail.recent_progress,
+                next_action=detail.next_action,
+                communication=CommunicationEntry(entry_date=date.today().isoformat()),
+            )
+        )
+        self.set_status(f"正在更新老客户「{detail.name}」。粘贴最新聊天后点 AI 整理到表单。")
+
+    def set_target_customer(self, name: str) -> None:
+        self.target_customer_name = name.strip()
+        if self.target_customer_name:
+            self.target_context_label.setText(f"当前模式：更新老客户「{self.target_customer_name}」")
+            self.raw_text_edit.setPlaceholderText(f"粘贴「{self.target_customer_name}」的最新聊天、需求或推进情况。")
+        else:
+            self.clear_target_customer()
+
+    def clear_target_customer(self) -> None:
+        self.target_customer_name = ""
+        self.target_context_label.setText("当前模式：通用录入")
+        self.raw_text_edit.setPlaceholderText("直接粘贴客户名、聊天记录、需求描述或推进情况，AI 会帮你整理成下面的字段。")
+
     def set_ai_busy(self, busy: bool) -> None:
         self.ai_extract_button.setEnabled(not busy)
         self.ai_extract_button.setText("AI 整理中..." if busy else "AI 整理到表单")
 
     def _emit_ai_extract_requested(self) -> None:
-        self.ai_extract_requested.emit(self.raw_text_edit.toPlainText().strip())
+        self.ai_extract_requested.emit(self.raw_text_edit.toPlainText().strip(), self.target_customer_name)
 
     def _emit_save_requested(self) -> None:
         communication = CommunicationEntry(

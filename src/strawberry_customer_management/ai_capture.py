@@ -67,13 +67,24 @@ class MiniMaxCaptureClient:
         self.timeout = timeout
         self.transport = transport or UrllibJsonTransport()
 
-    def extract_draft(self, raw_text: str, existing_customers: list[str], today: str | None = None) -> CustomerDraft:
+    def extract_draft(
+        self,
+        raw_text: str,
+        existing_customers: list[str],
+        today: str | None = None,
+        target_customer_name: str | None = None,
+    ) -> CustomerDraft:
         if not self.api_key:
             raise AICaptureError("请先在设置里填写 MiniMax API Key。")
         if not raw_text.strip():
             raise AICaptureError("请先粘贴客户聊天或需求原文。")
 
-        payload = self._build_payload(raw_text=raw_text, existing_customers=existing_customers, today=today or date.today().isoformat())
+        payload = self._build_payload(
+            raw_text=raw_text,
+            existing_customers=existing_customers,
+            today=today or date.today().isoformat(),
+            target_customer_name=target_customer_name,
+        )
         response = self.transport.post_json(
             f"{self.base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -81,19 +92,28 @@ class MiniMaxCaptureClient:
             timeout=self.timeout,
         )
         content = _extract_message_content(response)
-        return draft_from_ai_json(content, today=today or date.today().isoformat())
+        return draft_from_ai_json(content, today=today or date.today().isoformat(), target_customer_name=target_customer_name)
 
-    def _build_payload(self, raw_text: str, existing_customers: list[str], today: str) -> dict[str, Any]:
+    def _build_payload(
+        self,
+        raw_text: str,
+        existing_customers: list[str],
+        today: str,
+        target_customer_name: str | None = None,
+    ) -> dict[str, Any]:
         known_customers = "、".join(existing_customers[:80]) or "暂无"
+        target_hint = f"当前正在更新的老客户：{target_customer_name.strip()}\n" if target_customer_name and target_customer_name.strip() else ""
         system_prompt = (
             "你是一个中文客户管理录入助手。你的任务是把用户粘贴的客户聊天、需求或推进情况，"
             "整理成草莓客户管理系统的表单字段。只输出一个 JSON 对象，不要输出解释。"
         )
         user_prompt = f"""今天日期：{today}
 已存在客户：{known_customers}
+{target_hint}
 
 字段要求：
 - 客户名称：必须尽量提取，老客户要使用已存在客户里的同名或最接近名称。
+- 如果提供了“当前正在更新的老客户”，客户名称必须严格返回这个名称，不要改写或加后缀。
 - 客户类型：只能是 品牌客户 或 网店店群客户。
 - 阶段：只能是 潜客 / 沟通中 / 已合作 / 暂缓。
 - 业务方向：品牌客户常见为 种草 / 视频拍摄 / 品牌推广 / 网店采买；网店店群客户常见为 集采点数 / 店铺软件批量采购。
@@ -116,9 +136,10 @@ class MiniMaxCaptureClient:
         }
 
 
-def draft_from_ai_json(content: str, today: str | None = None) -> CustomerDraft:
+def draft_from_ai_json(content: str, today: str | None = None, target_customer_name: str | None = None) -> CustomerDraft:
     payload = _load_json_object(content)
     current_date = today or date.today().isoformat()
+    forced_name = target_customer_name.strip() if target_customer_name else ""
     communication = CommunicationEntry(
         entry_date=_value(payload, "沟通日期") or current_date,
         summary=_value(payload, "沟通结论"),
@@ -127,7 +148,7 @@ def draft_from_ai_json(content: str, today: str | None = None) -> CustomerDraft:
         next_step=_value(payload, "下一步"),
     )
     return CustomerDraft(
-        name=_value(payload, "客户名称"),
+        name=forced_name or _value(payload, "客户名称"),
         customer_type=_choice(_value(payload, "客户类型"), CUSTOMER_TYPES, "品牌客户"),
         stage=_choice(_value(payload, "阶段"), CUSTOMER_STAGES, "潜客"),
         business_direction=_value(payload, "业务方向"),
@@ -178,4 +199,3 @@ def _value(payload: dict[str, Any], key: str) -> str:
 
 def _choice(value: str, choices: tuple[str, ...], fallback: str) -> str:
     return value if value in choices else fallback
-

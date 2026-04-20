@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import (
-    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -26,6 +26,42 @@ from strawberry_customer_management.ui.pages.quick_capture_page import QuickCapt
 from strawberry_customer_management.ui.pages.settings_page import SettingsPage
 
 
+class AICaptureWorker(QObject):
+    succeeded = Signal(object)
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(
+        self,
+        client: MiniMaxCaptureClient,
+        raw_text: str,
+        existing_customers: list[str],
+        target_customer_name: str,
+    ) -> None:
+        super().__init__()
+        self.client = client
+        self.raw_text = raw_text
+        self.existing_customers = existing_customers
+        self.target_customer_name = target_customer_name
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            draft = self.client.extract_draft(
+                self.raw_text,
+                existing_customers=self.existing_customers,
+                target_customer_name=self.target_customer_name or None,
+            )
+        except AICaptureError as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001 - surface unexpected worker errors to the UI.
+            self.failed.emit(f"AI 整理失败：{exc}")
+        else:
+            self.succeeded.emit(draft)
+        finally:
+            self.finished.emit()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, config_store: ConfigStore) -> None:
         super().__init__()
@@ -36,6 +72,8 @@ class MainWindow(QMainWindow):
         self._config_store = config_store
         self._config = self._config_store.load()
         self._store = MarkdownCustomerStore(Path(self._config["customer_root"]))
+        self._ai_thread: QThread | None = None
+        self._ai_worker: AICaptureWorker | None = None
 
         self.nav = QListWidget()
         self.nav.addItems(["客户总览", "快速录入", "设置"])
@@ -50,6 +88,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.settings_page)
 
         self.overview_page.customer_selected.connect(self._show_customer)
+        self.overview_page.update_customer_requested.connect(self._prepare_existing_customer_update)
         self.quick_capture_page.ai_extract_requested.connect(self._handle_ai_extract)
         self.quick_capture_page.save_requested.connect(self._handle_capture_save)
         self.settings_page.save_requested.connect(self._handle_settings_save)
@@ -135,9 +174,21 @@ class MainWindow(QMainWindow):
         self.quick_capture_page.set_status(f"{detail.name} 已写入 Obsidian 客户管理工作台。")
         self.nav.setCurrentRow(0)
 
-    def _handle_ai_extract(self, raw_text: str) -> None:
+    def _prepare_existing_customer_update(self, name: str) -> None:
+        try:
+            detail = self._store.get_customer(name)
+        except KeyError:
+            QMessageBox.warning(self, "客户不存在", f"没有找到客户「{name}」。")
+            return
+        self.quick_capture_page.prepare_existing_customer_update(detail)
+        self.nav.setCurrentRow(1)
+
+    def _handle_ai_extract(self, raw_text: str, target_customer_name: str = "") -> None:
         if not raw_text:
             QMessageBox.warning(self, "缺少客户原文", "请先粘贴客户聊天、需求或推进情况。")
+            return
+        if self._ai_thread is not None and self._ai_thread.isRunning():
+            QMessageBox.information(self, "AI 正在整理", "上一条客户信息还在整理中，请稍等。")
             return
         api_key = resolved_minimax_api_key(self._config)
         if not api_key:
@@ -150,19 +201,42 @@ class MainWindow(QMainWindow):
             base_url=str(self._config.get("minimax_base_url", "")),
         )
         existing_customers = [record.name for record in self._store.list_customers()]
+        worker = AICaptureWorker(
+            client=client,
+            raw_text=raw_text,
+            existing_customers=existing_customers,
+            target_customer_name=target_customer_name,
+        )
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._handle_ai_extract_success)
+        worker.failed.connect(self._handle_ai_extract_failure)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._handle_ai_extract_finished)
+        self._ai_thread = thread
+        self._ai_worker = worker
         self.quick_capture_page.set_ai_busy(True)
         self.quick_capture_page.set_status("正在用 MiniMax 整理客户信息...")
-        QApplication.processEvents()
-        try:
-            draft = client.extract_draft(raw_text, existing_customers=existing_customers)
-        except AICaptureError as exc:
-            QMessageBox.warning(self, "AI 整理失败", str(exc))
-            self.quick_capture_page.set_status("AI 整理失败，可以修改原文后重试，或继续手动填写。")
-            return
-        finally:
-            self.quick_capture_page.set_ai_busy(False)
+        thread.start()
+
+    @Slot(object)
+    def _handle_ai_extract_success(self, draft: CustomerDraft) -> None:
         self.quick_capture_page.apply_draft(draft)
         self.quick_capture_page.set_status("AI 已整理到表单。请确认字段后，再保存并更新客户。")
+
+    @Slot(str)
+    def _handle_ai_extract_failure(self, message: str) -> None:
+        QMessageBox.warning(self, "AI 整理失败", message)
+        self.quick_capture_page.set_status("AI 整理失败，可以修改原文后重试，或继续手动填写。")
+
+    @Slot()
+    def _handle_ai_extract_finished(self) -> None:
+        self.quick_capture_page.set_ai_busy(False)
+        self._ai_thread = None
+        self._ai_worker = None
 
     def _handle_settings_save(self, payload: dict[str, str]) -> None:
         self._config.update(payload)
