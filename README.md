@@ -26,3 +26,8 @@ PYTHONPATH=src QT_QPA_PLATFORM=offscreen python3 -m pytest tests -q
 - 客户管理根路径：`/Users/gd/Library/Mobile Documents/iCloud~md~obsidian/Documents/主业助手/客户管理/`
 - 主业文件根路径：`/Users/gd/Desktop/主业`
 
+## 本地图片预览规则
+
+- 给用户预览本地图片时，先复制一份到纯英文路径，再用绝对路径写入 Markdown 图片。
+- 当前默认预览目录：`/Users/gd/Desktop/customer-icon-options/`
+- 避免直接引用中文项目路径或带空格路径下的图片，例如 `主业--草莓客户管理系统/docs/icon-options/`，否则 Codex 桌面预览可能显示为损坏图片。
