@@ -30,10 +30,24 @@ QFrame#WindowContentShell,
 QFrame#CardFrame,
 QFrame#FocusCard,
 QFrame#DetailCard,
-QFrame#SettingsCard {
+QFrame#SettingsCard,
+QFrame#TopbarPanel,
+QFrame#WorkspacePanel {
     background: rgba(255, 255, 255, 0.97);
     border: 1px solid #dbe4f2;
     border-radius: 22px;
+}
+
+QFrame#MetricCard {
+    background: #ffffff;
+    border: 1px solid #e3e9f4;
+    border-radius: 18px;
+}
+
+QFrame#SideItem {
+    background: #ffffff;
+    border: 1px solid #e6edf7;
+    border-radius: 14px;
 }
 
 QLabel#BrandTitle {
@@ -53,9 +67,89 @@ QLabel#SectionTitle {
     font-weight: 700;
 }
 
+QLabel#PanelTitle {
+    color: #244ebd;
+    background: #eef4ff;
+    border: 1px solid #d5e1ff;
+    border-radius: 10px;
+    padding: 5px 9px;
+    font-size: 14px;
+    font-weight: 850;
+}
+
 QLabel#SectionHint {
     color: #7e8aa5;
     font-size: 12px;
+}
+
+QLabel#PanelHint {
+    color: #74829a;
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+}
+
+QLabel#OverviewBanner {
+    background: #fff6df;
+    color: #684915;
+    border: 1px solid #f2d79c;
+    border-radius: 16px;
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QLabel#MetricLabel {
+    color: #7a89a6;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QLabel#MetricValue {
+    color: #1b2a45;
+    font-size: 25px;
+    font-weight: 850;
+}
+
+QLabel#SoftBadge {
+    background: #eef4ff;
+    color: #3f67d9;
+    border: 1px solid #d5e1ff;
+    border-radius: 10px;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QLabel#SideItemTitle {
+    color: #20304a;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+QLabel#EmptyState {
+    background: #f8fafc;
+    color: #7e8aa5;
+    border: 1px dashed #dbe4f2;
+    border-radius: 16px;
+    padding: 28px;
+}
+
+QFrame#ApprovalInboxDropZone {
+    background: #f8fbff;
+    border: 1px dashed #a9c0ff;
+    border-radius: 16px;
+}
+
+QFrame#ApprovalInboxDropZone:hover {
+    background: #eef4ff;
+    border-color: #4a7cff;
+}
+
+QLabel#DropZoneTitle {
+    color: #244ebd;
+    font-size: 14px;
+    font-weight: 850;
 }
 
 QLabel#FocusItem {
@@ -109,6 +203,62 @@ QPushButton#SecondaryActionButton:hover {
     background: #e3ecff;
 }
 
+QFrame#CustomerTile,
+QFrame#CustomerTileSelected {
+    background: #ffffff;
+    border: 1px solid #e0e8f4;
+    border-radius: 16px;
+    min-height: 108px;
+}
+
+QFrame#CustomerTileSelected {
+    background: #eef4ff;
+    border-color: #9fbcff;
+}
+
+QLabel#CustomerTileName {
+    color: #20304a;
+    font-size: 15px;
+    font-weight: 850;
+}
+
+QLabel#CustomerTileMeta {
+    color: #53627d;
+    font-size: 12px;
+    font-weight: 650;
+}
+
+QLabel#CustomerTileNeed {
+    color: #20304a;
+    font-size: 13px;
+    font-weight: 750;
+}
+
+QPushButton#InlineActionButton {
+    background: #eef4ff;
+    color: #244ebd;
+    border: 1px solid #cddcff;
+    border-radius: 10px;
+    padding: 5px 9px;
+    font-size: 12px;
+}
+
+QPushButton#FieldLockButton {
+    background: #f8fafc;
+    color: #53627d;
+    border: 1px solid #d9e2f1;
+    border-radius: 10px;
+    padding: 6px 9px;
+    font-size: 12px;
+    min-width: 46px;
+}
+
+QPushButton#FieldLockButton:checked {
+    background: #fff6df;
+    color: #9d6d16;
+    border: 1px solid #f1dca6;
+}
+
 QLineEdit, QTextEdit, QComboBox {
     background: #ffffff;
     border: 1px solid #d9e2f1;
@@ -131,4 +281,3 @@ QScrollArea, QAbstractScrollArea {
 
 def apply_theme(app: QApplication) -> None:
     app.setStyleSheet(APP_STYLESHEET)
-

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 from strawberry_customer_management.markdown_store import MarkdownCustomerStore
-from strawberry_customer_management.models import CommunicationEntry, CustomerDraft
+from strawberry_customer_management.models import ApprovalEntry, CommunicationEntry, CustomerDraft
 
 
 def write_seed_vault(root):
@@ -47,6 +47,8 @@ def write_seed_vault(root):
 - 客户名称：爱慕
 - 所属公司/主体：爱慕股份有限公司
 - 当前联系人：张三
+- 联系电话：13800001111
+- 微信号：amu_zhangsan
 - 来源：既有品牌合作
 - 主业文件路径：`/Users/gd/Desktop/主业/品牌项目/品牌--爱慕/`
 - 对外资料路径：待补充
@@ -78,6 +80,19 @@ def write_seed_vault(root):
 - 新增信息：合同内容为短视频拍摄制作服务
 - 风险/顾虑：新业务需重新确认
 - 下一步：补充新业务需求
+
+## 待归属审批
+### 2026-04-18 供应商用印待确认
+- 审批类型：其他证明&申请单
+- 审批标题/用途说明：供应商用印待确认
+- 对应公司：厦门市邱熊网络科技有限公司
+- 审批状态：审批中
+- 审批结果：--
+- 当前节点：业务Owner / tiger
+- 审批完成时间：--
+- 附件线索：2.26邱熊-爱慕股份有限公司策划项目确认单.docx
+- 备注：当前只能确认到爱慕品牌，具体项目待归位
+- 来源：钉钉审批
 
 ## 历史推进
 - 2026-04-16：完成合同审批明细整理
@@ -111,9 +126,69 @@ def test_reads_customer_detail_sections(tmp_path):
     assert detail.name == "爱慕"
     assert detail.customer_type == "品牌客户"
     assert detail.stage == "已合作"
+    assert detail.phone == "13800001111"
+    assert detail.wechat_id == "amu_zhangsan"
     assert detail.current_need == "新业务待继续补需求"
     assert detail.communication_entries[0].entry_date == "2026-04-16"
     assert detail.communication_entries[0].summary == "完成合同审批口径整理"
+    assert detail.pending_approval_count == 1
+    assert detail.pending_approval_entries[0].counterparty == "厦门市邱熊网络科技有限公司"
+
+
+def test_updates_customer_party_a_info_section(tmp_path):
+    write_seed_vault(tmp_path)
+    store = MarkdownCustomerStore(tmp_path)
+
+    detail = store.upsert_customer(
+        CustomerDraft(
+            name="爱慕",
+            customer_type="品牌客户",
+            stage="已合作",
+            business_direction="视频拍摄 / 品牌合作",
+            contact="张三",
+            company="爱慕股份有限公司",
+            current_need="新业务待继续补需求",
+            next_action="补充新业务需求",
+            party_a_brand="爱慕儿童",
+            party_a_company="爱慕股份有限公司",
+            party_a_contact="李岩",
+            party_a_phone="17778019272",
+            party_a_email="rellaliyan@aimer.com.cn",
+            party_a_address="北京市朝阳区望京开发区利泽中园2区218、219号楼爱慕大厦",
+            communication=CommunicationEntry(entry_date="2026-04-21", summary="补录甲方收件信息"),
+        )
+    )
+
+    assert detail.party_a_brand == "爱慕儿童"
+    assert detail.party_a_contact == "李岩"
+    text = (tmp_path / "客户" / "客户--爱慕.md").read_text(encoding="utf-8")
+    assert "## 甲方信息" in text
+    assert "- 收件联系人：李岩" in text
+    assert "- 电子邮箱：rellaliyan@aimer.com.cn" in text
+
+
+def test_appends_pending_customer_approval_without_losing_existing_data(tmp_path):
+    write_seed_vault(tmp_path)
+    store = MarkdownCustomerStore(tmp_path)
+
+    detail = store.append_pending_approval(
+        "爱慕",
+        ApprovalEntry(
+            entry_date="2026-04-21",
+            approval_type="其他证明&申请单",
+            title_or_usage="爱慕补充确认单审批",
+            counterparty="爱慕股份有限公司",
+            approval_status="审批中",
+            current_node="直属Owner / 花茶",
+            note="补录到客户待归属审批",
+        ),
+    )
+
+    assert detail.pending_approval_count == 2
+    assert detail.pending_approval_entries[0].title_or_usage == "爱慕补充确认单审批"
+    text = (tmp_path / "客户" / "客户--爱慕.md").read_text(encoding="utf-8")
+    assert "## 待归属审批" in text
+    assert "爱慕补充确认单审批" in text
 
 
 def test_creates_shop_group_customer_and_updates_summary(tmp_path):
@@ -127,6 +202,8 @@ def test_creates_shop_group_customer_and_updates_summary(tmp_path):
             stage="潜客",
             business_direction="集采点数 / 店铺软件批量采购",
             contact="王五",
+            phone="13812345678",
+            wechat_id="yunzhou_shop_01",
             shop_scale="50家店",
             current_need="想确认 50 家店批量购买是否有阶梯折扣",
             recent_progress="初次录入",
@@ -145,9 +222,47 @@ def test_creates_shop_group_customer_and_updates_summary(tmp_path):
     assert detail_path.exists()
     detail_text = detail_path.read_text(encoding="utf-8")
     assert "- 客户类型：网店店群客户" in detail_text
+    assert "- 联系电话：13812345678" in detail_text
+    assert "- 微信号：yunzhou_shop_01" in detail_text
     assert "- 关键数量/规模：50家店" in detail_text
     summary_text = (tmp_path / "00 客户总表.md").read_text(encoding="utf-8")
     assert "| 云舟店群 | 潜客 | 集采点数 / 店铺软件批量采购 | 50家店 | 想确认 50 家店批量购买是否有阶梯折扣 | 初次录入 | 确认采购软件、点数数量和期望折扣 | 王五 | [[客户/客户--云舟店群]] | 2026-04-20 |" in summary_text
+
+
+def test_creates_shop_ka_customer_and_adds_missing_summary_section(tmp_path):
+    write_seed_vault(tmp_path)
+    store = MarkdownCustomerStore(tmp_path)
+
+    store.upsert_customer(
+        CustomerDraft(
+            name="青竹画材官方旗舰店",
+            customer_type="网店KA客户",
+            stage="已合作",
+            business_direction="KA版 / AI裂变 / AI详情页",
+            contact="待补充",
+            shop_scale="抖店 · 已订购 KA版",
+            current_need="已使用 AI裂变，并对 AI详情页功能有明确兴趣",
+            recent_progress="从临时店群分类修正为 KA 客户运营",
+            next_action="跟进 AI详情页介绍、试用安排和增购可能",
+            communication=CommunicationEntry(
+                entry_date="2026-04-23",
+                summary="确认青竹画材官方旗舰店属于网店KA客户",
+                new_info="抖店已订购 KA版，主要使用 AI裂变",
+                next_step="继续跟进 AI详情页功能兴趣",
+            ),
+        )
+    )
+
+    detail_path = tmp_path / "客户" / "客户--青竹画材官方旗舰店.md"
+    assert detail_path.exists()
+    detail_text = detail_path.read_text(encoding="utf-8")
+    assert "- 客户类型：网店KA客户" in detail_text
+    assert "- 关键数量/规模：抖店 · 已订购 KA版" in detail_text
+    assert "- 合同/付款特征：已付费产品使用深化、功能跟进、增购/新功能转化" in detail_text
+    summary_text = (tmp_path / "00 客户总表.md").read_text(encoding="utf-8")
+    assert "## 网店KA客户总表" in summary_text
+    assert "| 客户 | 阶段 | 业务方向 | 店铺/产品状态 | 当前需求 | 最近推进 | 下次动作 | 主联系人 | 对应客户页 | 更新时间 |" in summary_text
+    assert "| 青竹画材官方旗舰店 | 已合作 | KA版 / AI裂变 / AI详情页 | 抖店 · 已订购 KA版 | 已使用 AI裂变，并对 AI详情页功能有明确兴趣 | 从临时店群分类修正为 KA 客户运营 | 跟进 AI详情页介绍、试用安排和增购可能 | 待补充 | [[客户/客户--青竹画材官方旗舰店]] | 2026-04-23 |" in summary_text
 
 
 def test_updates_existing_customer_without_creating_duplicate_page(tmp_path):
@@ -181,3 +296,51 @@ def test_updates_existing_customer_without_creating_duplicate_page(tmp_path):
     assert detail.current_need == "新业务需要补充品牌推广需求"
     assert any(entry.entry_date == "2026-04-20" for entry in detail.communication_entries)
 
+
+def test_renames_existing_customer_without_leaving_duplicate_summary_row(tmp_path):
+    write_seed_vault(tmp_path)
+    store = MarkdownCustomerStore(tmp_path)
+    store.upsert_customer(
+        CustomerDraft(
+            name="星河店群",
+            customer_type="网店店群客户",
+            stage="潜客",
+            business_direction="集采点数 / 店铺软件批量采购",
+            contact="李四",
+            shop_scale="30家店",
+            current_need="想问批量折扣",
+            recent_progress="初次询价",
+            next_action="确认采购量",
+            communication=CommunicationEntry(entry_date="2026-04-20", summary="初次询价"),
+        )
+    )
+
+    detail = store.upsert_customer(
+        CustomerDraft(
+            original_name="星河店群",
+            name="星河抖店店群",
+            customer_type="网店店群客户",
+            stage="沟通中",
+            business_direction="集采点数 / 店铺软件批量采购",
+            contact="李四",
+            phone="13900001111",
+            shop_scale="30家店",
+            current_need="继续确认批量折扣",
+            recent_progress="客户名称已确认",
+            next_action="按新名称继续报价",
+            communication=CommunicationEntry(
+                entry_date="2026-04-20",
+                summary="客户名称从星河店群确认成星河抖店店群",
+            ),
+        )
+    )
+
+    assert detail.name == "星河抖店店群"
+    assert not (tmp_path / "客户" / "客户--星河店群.md").exists()
+    renamed_text = (tmp_path / "客户" / "客户--星河抖店店群.md").read_text(encoding="utf-8")
+    assert renamed_text.startswith("# 客户--星河抖店店群")
+    assert "- 客户名称：星河抖店店群" in renamed_text
+    assert "- 联系电话：13900001111" in renamed_text
+    summary_text = (tmp_path / "00 客户总表.md").read_text(encoding="utf-8")
+    assert "| 星河店群 |" not in summary_text
+    assert "| 星河抖店店群 | 沟通中 | 集采点数 / 店铺软件批量采购 | 30家店 | 继续确认批量折扣 | 客户名称已确认 | 按新名称继续报价 | 李四 | [[客户/客户--星河抖店店群]] | 2026-04-20 |" in summary_text

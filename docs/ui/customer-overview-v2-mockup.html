@@ -1,0 +1,1707 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>草莓客户管理系统 · 客户总览 V2 原型</title>
+  <style>
+    :root {
+      --page: #e9eef5;
+      --shell: #f4f7fb;
+      --surface: rgba(255, 255, 255, 0.97);
+      --surface-strong: #ffffff;
+      --line: #dbe4f2;
+      --line-soft: #e6edf7;
+      --text: #20304a;
+      --text-strong: #17253d;
+      --muted: #74829a;
+      --brand: #ff4b6e;
+      --blue: #4a7cff;
+      --blue-dark: #3d70f0;
+      --blue-soft: #eef4ff;
+      --green: #2ba977;
+      --green-soft: #e8f8f1;
+      --amber: #d28b18;
+      --amber-soft: #fff6df;
+      --red: #d6455d;
+      --red-soft: #fff0f2;
+      --shadow: 0 18px 48px rgba(32, 48, 74, 0.08);
+      --radius-lg: 22px;
+      --radius-md: 16px;
+      --radius-sm: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Segoe UI", Arial, sans-serif;
+      font-size: 14px;
+    }
+
+    button,
+    select,
+    input,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .app {
+      min-height: 100vh;
+      padding: 18px;
+    }
+
+    .window {
+      min-height: calc(100vh - 36px);
+      display: grid;
+      grid-template-columns: 176px minmax(920px, 1fr);
+      overflow: hidden;
+      background: var(--shell);
+      border: 1px solid #d8e1ef;
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .sidebar {
+      background: #f8fafc;
+      border-right: 1px solid #e2e8f0;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .brand {
+      display: grid;
+      gap: 2px;
+    }
+
+    .brand-title {
+      color: var(--brand);
+      font-size: 26px;
+      font-weight: 800;
+      line-height: 1.05;
+    }
+
+    .brand-subtitle {
+      color: #7e8aa5;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .nav {
+      display: grid;
+      gap: 6px;
+      padding: 6px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+    }
+
+    .nav-button {
+      width: 100%;
+      min-height: 38px;
+      padding: 9px 11px;
+      text-align: left;
+      color: #52627f;
+      background: transparent;
+      border: 0;
+      border-radius: 12px;
+      font-weight: 700;
+      transition: background 160ms ease, color 160ms ease;
+    }
+
+    .nav-button.active {
+      color: #ffffff;
+      background: var(--blue);
+    }
+
+    .sidebar-note {
+      margin-top: auto;
+      padding: 12px;
+      color: var(--muted);
+      background: #eef4ff;
+      border: 1px solid #d7e4ff;
+      border-radius: 16px;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .workspace {
+      min-width: 0;
+      background: #f6f8fc;
+      overflow: auto;
+    }
+
+    .workspace-inner {
+      display: grid;
+      gap: 14px;
+      padding: 16px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+    }
+
+    .page-heading {
+      display: grid;
+      gap: 3px;
+      min-width: 320px;
+    }
+
+    .page-title {
+      margin: 0;
+      color: #1c2740;
+      font-size: 20px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+
+    .page-meta {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .topbar-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .select {
+      min-height: 36px;
+      padding: 7px 10px;
+      color: var(--text);
+      background: #ffffff;
+      border: 1px solid #d9e2f1;
+      border-radius: 10px;
+      outline: none;
+    }
+
+    .button {
+      min-height: 36px;
+      padding: 7px 12px;
+      color: #ffffff;
+      background: var(--blue);
+      border: 0;
+      border-radius: 14px;
+      font-weight: 700;
+    }
+
+    .button:hover {
+      background: var(--blue-dark);
+    }
+
+    .button.secondary {
+      color: #3f67d9;
+      background: #eef4ff;
+      border: 1px solid #cddcff;
+    }
+
+    .button.secondary:hover {
+      background: #e3ecff;
+    }
+
+    .banner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      color: #684915;
+      background: var(--amber-soft);
+      border: 1px solid #f2d79c;
+      border-radius: 16px;
+      font-weight: 700;
+    }
+
+    .banner span {
+      color: #8a681e;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .page {
+      display: none;
+      gap: 14px;
+      animation: pageIn 180ms ease-out;
+    }
+
+    .page.active {
+      display: grid;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      min-height: 112px;
+      padding: 14px;
+      display: grid;
+      align-content: space-between;
+      gap: 10px;
+      background: #ffffff;
+      border: 1px solid #e3e9f4;
+      border-radius: 18px;
+    }
+
+    .metric-label {
+      color: #7a89a6;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .metric-value {
+      color: #1b2a45;
+      font-size: 25px;
+      font-weight: 850;
+      line-height: 1.1;
+      white-space: nowrap;
+    }
+
+    .metric-note {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      color: #3f67d9;
+      background: #eef4ff;
+      border: 1px solid #d5e1ff;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    .tag.green {
+      color: #1f7d5b;
+      background: var(--green-soft);
+      border-color: #bfe8d6;
+    }
+
+    .tag.amber {
+      color: #9d6d16;
+      background: var(--amber-soft);
+      border-color: #f1dca6;
+    }
+
+    .tag.red {
+      color: #bd3650;
+      background: var(--red-soft);
+      border-color: #f2c3cb;
+    }
+
+    .tag.gray {
+      color: #66758f;
+      background: #f1f5fb;
+      border-color: #dce5f2;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+    }
+
+    .panel.pad {
+      padding: 14px;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .panel-header .right {
+      margin-left: auto;
+    }
+
+    .panel-title {
+      margin: 0;
+      color: #1f2b44;
+      font-size: 16px;
+      font-weight: 800;
+      line-height: 1.3;
+    }
+
+    .panel-subtitle {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .dashboard-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .main-column,
+    .side-column {
+      display: grid;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .customer-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .customer-card {
+      padding: 13px;
+      background: #ffffff;
+      border: 1px solid #e5ecfb;
+      border-radius: 16px;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .customer-card:hover {
+      transform: translateY(-1px);
+      border-color: #c9d8ff;
+    }
+
+    .customer-card.active {
+      background: #eef4ff;
+      border-color: #bdd0ff;
+      box-shadow: inset 0 0 0 1px rgba(74, 124, 255, 0.08);
+    }
+
+    .customer-top,
+    .customer-bottom {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      justify-content: space-between;
+    }
+
+    .customer-name {
+      color: var(--text-strong);
+      font-size: 16px;
+      font-weight: 850;
+    }
+
+    .customer-type {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .customer-need {
+      margin: 12px 0 10px;
+      color: #243653;
+      line-height: 1.6;
+      font-weight: 650;
+    }
+
+    .customer-bottom {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      align-items: end;
+    }
+
+    .customer-next {
+      max-width: 78%;
+      line-height: 1.55;
+    }
+
+    .reminder-list,
+    .missing-list,
+    .detail-grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .reminder-row,
+    .missing-row {
+      padding: 12px;
+      background: #ffffff;
+      border: 1px solid #e5ecfb;
+      border-radius: 15px;
+    }
+
+    .reminder-main,
+    .missing-main {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .reminder-title,
+    .missing-title {
+      color: var(--text-strong);
+      font-weight: 800;
+    }
+
+    .reminder-date,
+    .missing-date {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .reminder-details,
+    .missing-details {
+      margin-top: 10px;
+      padding-top: 10px;
+      color: var(--muted);
+      border-top: 1px solid #edf2fb;
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .detail-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .detail-title {
+      color: #1c2740;
+      font-size: 24px;
+      font-weight: 850;
+      line-height: 1.15;
+    }
+
+    .detail-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .detail-grid {
+      grid-template-columns: 1.1fr 1fr 1fr;
+      align-items: start;
+    }
+
+    .detail-block {
+      min-height: 100%;
+      padding: 14px;
+      background: #ffffff;
+      border: 1px solid #e5ecfb;
+      border-radius: 16px;
+    }
+
+    .detail-block-title {
+      margin: 0 0 10px;
+      color: var(--text-strong);
+      font-size: 14px;
+      font-weight: 850;
+    }
+
+    .detail-copy {
+      color: #243653;
+      line-height: 1.7;
+      font-weight: 650;
+    }
+
+    .detail-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .detail-item {
+      padding-bottom: 8px;
+      border-bottom: 1px solid #edf2fb;
+    }
+
+    .detail-item:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .detail-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .detail-value {
+      margin-top: 3px;
+      color: var(--text-strong);
+      font-weight: 750;
+      line-height: 1.6;
+    }
+
+    .detail-note {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+      font-weight: 600;
+    }
+
+    .empty-box {
+      padding: 18px;
+      color: var(--muted);
+      background: #fcfdff;
+      border: 1px dashed #cad6e9;
+      border-radius: 16px;
+      font-weight: 650;
+      line-height: 1.7;
+    }
+
+    .capture-layout,
+    .settings-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .capture-main,
+    .capture-side,
+    .settings-main,
+    .settings-side {
+      display: grid;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .field.span-2 {
+      grid-column: 1 / -1;
+    }
+
+    .field-label {
+      color: #7c8aa6;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .input,
+    .textarea,
+    .readonly {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 38px;
+      padding: 9px 10px;
+      color: var(--text-strong);
+      background: #ffffff;
+      border: 1px solid #dbe4f4;
+      border-radius: 12px;
+      outline: none;
+    }
+
+    .textarea {
+      min-height: 112px;
+      resize: vertical;
+      line-height: 1.7;
+    }
+
+    #captureRawText {
+      min-height: 156px;
+    }
+
+    .readonly {
+      background: #fcfdff;
+      font-weight: 700;
+    }
+
+    .helper-list,
+    .status-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .helper-card,
+    .status-card {
+      padding: 12px;
+      background: #ffffff;
+      border: 1px solid #e5ecfb;
+      border-radius: 15px;
+    }
+
+    .helper-title,
+    .status-title {
+      color: var(--text-strong);
+      font-weight: 800;
+    }
+
+    .helper-copy,
+    .status-copy {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+      font-weight: 600;
+    }
+
+    .info-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px;
+      background: #f8fbff;
+      border: 1px solid #e2eaf8;
+      border-radius: 14px;
+    }
+
+    .info-main {
+      display: grid;
+      gap: 3px;
+    }
+
+    .info-title {
+      color: var(--text-strong);
+      font-weight: 800;
+    }
+
+    .info-copy {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.6;
+    }
+
+    .status-metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .status-metric {
+      padding: 12px;
+      background: #ffffff;
+      border: 1px solid #e5ecfb;
+      border-radius: 15px;
+    }
+
+    .status-metric-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .status-metric-value {
+      margin-top: 6px;
+      color: var(--text-strong);
+      font-size: 18px;
+      font-weight: 850;
+    }
+
+    .status-metric-note {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.6;
+    }
+
+    @keyframes pageIn {
+      from {
+        opacity: 0;
+        transform: translateY(5px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (max-width: 1420px) {
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 1180px) {
+      .window {
+        grid-template-columns: 152px minmax(720px, 1fr);
+      }
+
+      .metric-grid,
+      .customer-grid,
+      .field-grid,
+      .status-metric-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .dashboard-layout,
+      .capture-layout,
+      .settings-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 820px) {
+      .app {
+        padding: 0;
+      }
+
+      .window {
+        min-height: 100vh;
+        grid-template-columns: 1fr;
+        border-radius: 0;
+      }
+
+      .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid #e2e8f0;
+      }
+
+      .nav {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .metric-grid,
+      .customer-grid,
+      .detail-grid,
+      .field-grid,
+      .status-metric-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar,
+      .detail-header,
+      .panel-header,
+      .reminder-main,
+      .missing-main {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .topbar-actions,
+      .panel-header .right,
+      .reminder-date,
+      .missing-date {
+        margin-left: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="window">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-title">草莓</div>
+          <div class="brand-subtitle">客户管理系统</div>
+        </div>
+
+        <nav class="nav" aria-label="主导航">
+          <button class="nav-button active" type="button" data-page="overview">客户总览</button>
+          <button class="nav-button" type="button" data-page="capture">快速录入</button>
+          <button class="nav-button" type="button" data-page="settings">设置</button>
+        </nav>
+
+        <div class="sidebar-note">
+          这是客户总览 V2 视觉原型。先验证结构和信息层级，不连接真实 App，也不改当前 Markdown 口径。
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <div class="workspace-inner">
+          <section class="page active" id="page-overview" data-view="overview">
+            <section class="topbar">
+              <div class="page-heading">
+                <h1 class="page-title">客户总览</h1>
+                <div class="page-meta" id="pageMeta">更新时间：2026-04-20 · 一期口径：只使用当前客户页与客户总表已有字段</div>
+              </div>
+              <div class="topbar-actions">
+                <select class="select" aria-label="客户类型筛选" id="customerTypeFilter">
+                  <option value="all">全部客户（示例）</option>
+                  <option value="品牌客户">品牌客户</option>
+                  <option value="网店店群客户">网店店群客户</option>
+                </select>
+                <button class="button secondary" type="button">导出示例</button>
+                <button class="button" type="button" data-action="go-capture">快速录入</button>
+              </div>
+            </section>
+
+            <div class="banner">
+              客户工作台原型，仅展示一期字段
+              <span>这里只验证总览结构是否顺眼；报价、合同、交付、回款等二期字段暂不进入首屏。</span>
+            </div>
+
+            <section class="metric-grid" aria-label="顶部指标卡" id="metricGrid"></section>
+
+            <div class="dashboard-layout">
+              <div class="main-column">
+                <section class="panel pad">
+                  <div class="panel-header">
+                    <div>
+                      <h2 class="panel-title">客户推进概览</h2>
+                      <div class="panel-subtitle">先看当前客户处于什么阶段、最需要补什么、下一步准备做什么。</div>
+                    </div>
+                    <span class="tag gray right" id="customerScopeBadge">当前 4 个真实客户</span>
+                  </div>
+                  <div class="customer-grid" id="customerGrid"></div>
+                </section>
+              </div>
+
+              <aside class="side-column">
+                <section class="panel pad">
+                  <div class="panel-header">
+                    <div>
+                      <h2 class="panel-title">待跟进客户</h2>
+                      <div class="panel-subtitle">先看谁最该继续推进，以及下一步落点是什么。</div>
+                    </div>
+                  </div>
+                  <div class="reminder-list" id="followupList"></div>
+                </section>
+
+                <section class="panel pad">
+                  <div class="panel-header">
+                    <div>
+                      <h2 class="panel-title">待补资料</h2>
+                      <div class="panel-subtitle">这些缺口会直接影响推进效率，优先补齐联系人、需求和预算线索。</div>
+                    </div>
+                  </div>
+                  <div class="missing-list" id="missingList"></div>
+                </section>
+              </aside>
+            </div>
+
+            <section class="panel pad">
+              <div class="detail-header">
+                <div>
+                  <div class="detail-title" id="detailName">爱慕</div>
+                  <div class="detail-meta" id="detailMeta">品牌客户 · 已合作 · 视频拍摄 / 品牌合作 / 新业务推进</div>
+                </div>
+                <button class="button secondary" type="button" data-action="update-active-customer">AI 更新此客户</button>
+              </div>
+
+              <div class="detail-grid">
+                <section class="detail-block">
+                  <h3 class="detail-block-title">当前需求</h3>
+                  <div class="detail-copy" id="detailNeed"></div>
+                  <div class="detail-list" style="margin-top: 14px;">
+                    <div class="detail-item">
+                      <div class="detail-label">当前重点</div>
+                      <div class="detail-value" id="detailFocus"></div>
+                    </div>
+                    <div class="detail-item">
+                      <div class="detail-label">下次动作</div>
+                      <div class="detail-value" id="detailNext"></div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="detail-block">
+                  <h3 class="detail-block-title">当前判断</h3>
+                  <div class="detail-list">
+                    <div class="detail-item">
+                      <div class="detail-label">阶段</div>
+                      <div class="detail-value" id="detailStage"></div>
+                    </div>
+                    <div class="detail-item">
+                      <div class="detail-label">联系人</div>
+                      <div class="detail-value" id="detailContact"></div>
+                    </div>
+                    <div class="detail-item">
+                      <div class="detail-label">预算 / 报价线索</div>
+                      <div class="detail-value" id="detailBudget"></div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="detail-block">
+                  <h3 class="detail-block-title">最近沟通沉淀</h3>
+                  <div class="detail-list">
+                    <div class="detail-item">
+                      <div class="detail-label" id="detailCommDate"></div>
+                      <div class="detail-value" id="detailCommSummary"></div>
+                    </div>
+                    <div class="detail-item">
+                      <div class="detail-label">新增信息</div>
+                      <div class="detail-note" id="detailCommNew"></div>
+                    </div>
+                    <div class="detail-item">
+                      <div class="detail-label">风险 / 顾虑</div>
+                      <div class="detail-note" id="detailCommRisk"></div>
+                    </div>
+                    <div class="detail-item">
+                      <div class="detail-label">下一步</div>
+                      <div class="detail-note" id="detailCommNext"></div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </section>
+          </section>
+
+          <section class="page" id="page-capture" data-view="capture">
+            <section class="topbar">
+              <div class="page-heading">
+                <h1 class="page-title">快速录入</h1>
+                <div class="page-meta">新客户和老客户更新都可以粘贴原文，AI 整理后你确认再保存。</div>
+              </div>
+              <div class="topbar-actions">
+                <button class="button secondary" type="button" data-action="go-overview">返回总览</button>
+                <button class="button" type="button">保存并更新客户</button>
+              </div>
+            </section>
+
+            <div class="banner">
+              一期录入原则：只沉淀有效信息
+              <span>同一客户同一需求优先合并到原客户页，方向变化再沉淀到历史推进。</span>
+            </div>
+
+            <div class="capture-layout">
+              <div class="capture-main">
+                <section class="panel pad">
+                  <div class="panel-header">
+                    <div>
+                      <h2 class="panel-title">客户原文</h2>
+                      <div class="panel-subtitle">可以直接粘贴客户名、聊天记录、需求描述或推进情况。</div>
+                    </div>
+                    <span class="tag right" id="captureModeTag">通用录入</span>
+                  </div>
+                  <textarea class="textarea" id="captureRawText" placeholder="例：爱慕今天补充了新业务需求，想继续聊 26 年春夏视频拍摄，预算还没定，需要先确认联系人和报价口径。"></textarea>
+                  <div class="info-strip" id="captureTargetContext" style="margin-top: 12px;">
+                    <div class="info-main">
+                      <div class="info-title">当前模式：通用录入</div>
+                      <div class="info-copy">从总览详情点“AI 更新此客户”后，这里会自动锁定为老客户更新。</div>
+                    </div>
+                    <button class="button secondary" type="button">AI 整理到表单</button>
+                  </div>
+                </section>
+
+                <section class="panel pad">
+                  <div class="panel-header">
+                    <div>
+                      <h2 class="panel-title">结构化字段</h2>
+                      <div class="panel-subtitle">这些字段对应当前一期客户页，保存前只需要确认一句话是否准确。</div>
+                    </div>
+                  </div>
+                  <div class="field-grid">
+                    <label class="field">
+                      <span class="field-label">客户名称</span>
+                      <input class="input" id="captureCustomerName" value="">
+                    </label>
+                    <label class="field">
+                      <span class="field-label">客户类型</span>
+                      <select class="select input" id="captureCustomerType">
+                        <option>品牌客户</option>
+                        <option>网店店群客户</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span class="field-label">阶段</span>
+                      <select class="select input" id="captureCustomerStage">
+                        <option>潜客</option>
+                        <option>沟通中</option>
+                        <option>已合作</option>
+                        <option>暂缓</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span class="field-label">业务方向</span>
+                      <input class="input" id="captureBusinessDirection" placeholder="种草 / 视频拍摄 / 集采点数 / 软件折扣">
+                    </label>
+                    <label class="field">
+                      <span class="field-label">联系人</span>
+                      <input class="input" id="captureContact" placeholder="待补充">
+                    </label>
+                    <label class="field">
+                      <span class="field-label">所属主体 / 店铺规模</span>
+                      <input class="input" placeholder="公司名，或店群客户的店铺数量">
+                    </label>
+                    <label class="field span-2">
+                      <span class="field-label">当前需求</span>
+                      <textarea class="textarea" id="captureCurrentNeed" placeholder="用一句话写清楚客户现在要什么，不写流水账。"></textarea>
+                    </label>
+                    <label class="field">
+                      <span class="field-label">最近推进</span>
+                      <input class="input" id="captureRecentProgress" placeholder="最近发生了什么关键推进">
+                    </label>
+                    <label class="field">
+                      <span class="field-label">下次动作</span>
+                      <input class="input" id="captureNextAction" placeholder="下一步具体做什么">
+                    </label>
+                    <label class="field span-2">
+                      <span class="field-label">沟通结论</span>
+                      <textarea class="textarea" id="captureCommunicationSummary" placeholder="当天多轮聊天合并成一条结论。"></textarea>
+                    </label>
+                  </div>
+                </section>
+              </div>
+
+              <aside class="capture-side">
+                <section class="panel pad">
+                  <div class="panel-header">
+                    <div>
+                      <h2 class="panel-title">适合粘贴什么</h2>
+                      <div class="panel-subtitle">AI 只帮你整理，不直接写入 Obsidian。</div>
+                    </div>
+                  </div>
+                  <div class="helper-list">
+                    <div class="helper-card">
+                      <div class="helper-title">新客户第一次出现</div>
+                      <div class="helper-copy">粘贴客户名、客户类型、需求大意和下一步，就能生成客户页基础信息。</div>
+                    </div>
+                    <div class="helper-card">
+                      <div class="helper-title">老客户补充情况</div>
+                      <div class="helper-copy">粘贴最新聊天或推进结果，优先更新当前需求和当天沟通沉淀。</div>
+                    </div>
+                    <div class="helper-card">
+                      <div class="helper-title">店群客户线索</div>
+                      <div class="helper-copy">重点写清店铺规模、集采点数、软件购买数量和是否要折扣。</div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="panel pad">
+                  <div class="panel-header">
+                    <div>
+                      <h2 class="panel-title">保存前检查</h2>
+                      <div class="panel-subtitle">保证不会把同一件事拆成碎页。</div>
+                    </div>
+                  </div>
+                  <div class="status-list">
+                    <div class="status-card">
+                      <div class="status-title">客户名是否准确</div>
+                      <div class="status-copy">老客户更新时，客户名必须保持和原客户页一致。</div>
+                    </div>
+                    <div class="status-card">
+                      <div class="status-title">需求是否是一句话</div>
+                      <div class="status-copy">当前需求保留最新判断，旧版本只在方向变化时进入历史推进。</div>
+                    </div>
+                  </div>
+                </section>
+              </aside>
+            </div>
+          </section>
+
+          <section class="page" id="page-settings" data-view="settings">
+            <section class="topbar">
+              <div class="page-heading">
+                <h1 class="page-title">设置</h1>
+                <div class="page-meta">确认 Obsidian 客户管理路径、主业文件根路径和 MiniMax 配置。</div>
+              </div>
+              <div class="topbar-actions">
+                <button class="button secondary" type="button">刷新数据</button>
+                <button class="button" type="button">保存设置</button>
+              </div>
+            </section>
+
+            <div class="banner">
+              设置页原型只展示配置结构
+              <span>真实密钥不会写进原型截图；正式 App 仍按本地设置文件读取。</span>
+            </div>
+
+            <div class="settings-layout">
+              <div class="settings-main">
+                <section class="panel pad">
+                  <div class="panel-header">
+                    <div>
+                      <h2 class="panel-title">数据源路径</h2>
+                      <div class="panel-subtitle">Obsidian 是客户主数据源，桌面主业目录只负责真实文件归档。</div>
+                    </div>
+                    <span class="tag green right">已识别</span>
+                  </div>
+                  <div class="field-grid">
+                    <label class="field span-2">
+                      <span class="field-label">客户管理根路径</span>
+                      <input class="input" value="/Users/gd/Library/Mobile Documents/iCloud~md~obsidian/Documents/草莓客户管理系统/客户数据/">
+                    </label>
+                    <label class="field span-2">
+                      <span class="field-label">主业文件根路径</span>
+                      <input class="input" value="/Users/gd/Desktop/主业/">
+                    </label>
+                  </div>
+                </section>
+
+                <section class="panel pad">
+                  <div class="panel-header">
+                    <div>
+                      <h2 class="panel-title">AI 整理配置</h2>
+                      <div class="panel-subtitle">MiniMax 只参与整理表单，保存仍由你确认后触发。</div>
+                    </div>
+                  </div>
+                  <div class="field-grid">
+                    <label class="field span-2">
+                      <span class="field-label">MiniMax API Key</span>
+                      <input class="input" type="password" value="sk-••••••••••••••••••••">
+                    </label>
+                    <label class="field">
+                      <span class="field-label">MiniMax 模型</span>
+                      <input class="input" value="abab6.5s-chat">
+                    </label>
+                    <label class="field">
+                      <span class="field-label">MiniMax Base URL</span>
+                      <input class="input" value="https://api.minimax.chat/v1">
+                    </label>
+                  </div>
+                </section>
+              </div>
+
+              <aside class="settings-side">
+                <section class="panel pad">
+                  <div class="panel-header">
+                    <div>
+                      <h2 class="panel-title">当前状态</h2>
+                      <div class="panel-subtitle">设置页需要让你一眼知道能不能正常工作。</div>
+                    </div>
+                  </div>
+                  <div class="status-metric-grid">
+                    <div class="status-metric">
+                      <div class="status-metric-label">客户页</div>
+                      <div class="status-metric-value">4</div>
+                      <div class="status-metric-note">当前真实客户</div>
+                    </div>
+                    <div class="status-metric">
+                      <div class="status-metric-label">数据源</div>
+                      <div class="status-metric-value">Obsidian</div>
+                      <div class="status-metric-note">Markdown 为准</div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="panel pad">
+                  <div class="panel-header">
+                    <div>
+                      <h2 class="panel-title">校验说明</h2>
+                      <div class="panel-subtitle">正式 App 里这里会显示真实校验结果。</div>
+                    </div>
+                  </div>
+                  <div class="status-list">
+                    <div class="status-card">
+                      <div class="status-title">路径校验</div>
+                      <div class="status-copy">确认 `00 客户总表.md` 和 `客户/` 目录都存在。</div>
+                    </div>
+                    <div class="status-card">
+                      <div class="status-title">密钥安全</div>
+                      <div class="status-copy">截图和原型只显示遮罩，不展示完整 API Key。</div>
+                    </div>
+                  </div>
+                </section>
+              </aside>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const customers = [
+      {
+        name: "爱慕",
+        type: "品牌客户",
+        stage: "已合作",
+        stageTag: "green",
+        businessDirection: "视频拍摄 / 品牌合作 / 新业务推进",
+        currentNeed: "爱慕儿童 26 年春夏短视频拍摄制作服务已形成合同与归档；新业务需求待继续补充。",
+        nextAction: "补充新业务具体需求、联系人、预算 / 报价线索。",
+        updatedAt: "2026-04-20",
+        focus: "既有合作资料已沉淀，下一步补齐新业务推进的具体需求和联系人信息。",
+        contact: "待补充",
+        budget: "既有合同含税金额 33132.42 元；新业务预算待补充。",
+        communication: {
+          date: "2026-04-16",
+          summary: "完成爱慕品牌合同审批口径整理，并明确本次为单次项目合作、非年框合同。",
+          newInfo: "合同内容为爱慕儿童 26 年春夏短视频拍摄制作服务。",
+          risk: "后续新业务不能直接套用旧合同口径，需要重新确认具体需求。",
+          next: "继续补充新业务需求、联系人、报价线索和推进节点。"
+        }
+      },
+      {
+        name: "曼妮芬",
+        type: "品牌客户",
+        stage: "沟通中",
+        stageTag: "amber",
+        businessDirection: "待补充",
+        currentNeed: "已有品牌资料、执行资料和授权资料沉淀，具体合作需求待补。",
+        nextAction: "补充当前合作主题、联系人、需求和下一步动作。",
+        updatedAt: "2026-04-20",
+        focus: "已有品牌资料沉淀，但还没有形成可执行的合作主题和推进节奏。",
+        contact: "待补充",
+        budget: "待补充",
+        communication: {
+          date: "2026-04-20",
+          summary: "先作为品牌客户纳入客户管理系统。",
+          newInfo: "桌面主业仓库已有品牌目录，可以继续承接后续真实聊天和需求。",
+          risk: "当前缺少具体需求、联系人和推进状态，容易停留在资料层。",
+          next: "后续收到聊天记录或需求后，直接合并到当前客户页。"
+        }
+      },
+      {
+        name: "MW1",
+        type: "品牌客户",
+        stage: "已合作",
+        stageTag: "green",
+        businessDirection: "短视频拍摄",
+        currentNeed: "短视频拍摄合同相关资料已归档，当前需求待补充。",
+        nextAction: "补充年份、联系人、当前需求和是否仍需推进。",
+        updatedAt: "2026-04-20",
+        focus: "合同资料已按品牌项目规则归档，后续需补齐年份和当前是否继续推进。",
+        contact: "待补充",
+        budget: "待补充",
+        communication: {
+          date: "2026-04-16",
+          summary: "MW1 已确认为品牌，相关资料进入品牌项目目录。",
+          newInfo: "已有 MW1 短视频拍摄合同目录。",
+          risk: "年份与当前推进状态仍待确认。",
+          next: "补齐年份、联系人和当前需求。"
+        }
+      },
+      {
+        name: "blackhead",
+        type: "品牌客户",
+        stage: "已合作",
+        stageTag: "green",
+        businessDirection: "小红书营销",
+        currentNeed: "小红书营销合同相关资料已归档，当前需求待补充。",
+        nextAction: "补充年份、联系人、当前需求和是否仍需推进。",
+        updatedAt: "2026-04-20",
+        focus: "合同资料已按品牌项目规则归档，后续需确认当前是否还在推进。",
+        contact: "待补充",
+        budget: "待补充",
+        communication: {
+          date: "2026-04-16",
+          summary: "blackhead 已确认为品牌，相关合同进入品牌项目目录。",
+          newInfo: "已有 blackhead 小红书营销合同目录。",
+          risk: "年份与当前推进状态仍待确认。",
+          next: "补齐年份、联系人和当前需求。"
+        }
+      }
+    ];
+
+    const followups = [
+      {
+        title: "爱慕",
+        customerType: "品牌客户",
+        tag: "green",
+        tagText: "新业务",
+        date: "优先",
+        details: "已有合作基础和合同资料，最适合继续往新业务机会推进，重点补联系人、预算和需求一句话。"
+      },
+      {
+        title: "曼妮芬",
+        customerType: "品牌客户",
+        tag: "amber",
+        tagText: "沟通中",
+        date: "尽快",
+        details: "目前还停留在资料层，尽快把当前合作主题、联系人和推进阶段补起来，不然很容易悬空。"
+      },
+      {
+        title: "MW1",
+        customerType: "品牌客户",
+        tag: "gray",
+        tagText: "回查",
+        date: "本周",
+        details: "已合作资料在，但当前是否继续推进、项目年份和联系人仍不清楚，需要一次性回查补齐。"
+      }
+    ];
+
+    const missingItems = [
+      {
+        title: "爱慕 · 预算 / 报价线索",
+        customerType: "品牌客户",
+        tag: "amber",
+        tagText: "缺口",
+        date: "待补",
+        details: "既有合同金额已知，但新业务预算还没有形成可判断的报价线索。"
+      },
+      {
+        title: "曼妮芬 · 联系人与需求",
+        customerType: "品牌客户",
+        tag: "red",
+        tagText: "优先补",
+        date: "待补",
+        details: "联系人、需求一句话、推进动作都还不完整，是当前最影响继续推进的缺口。"
+      },
+      {
+        title: "MW1 · 项目年份",
+        customerType: "品牌客户",
+        tag: "gray",
+        tagText: "待确认",
+        date: "回查",
+        details: "已有合同资料，但年份未确认，会影响后续判断当前合作是否仍有延续价值。"
+      },
+      {
+        title: "blackhead · 当前是否仍推进",
+        customerType: "品牌客户",
+        tag: "gray",
+        tagText: "待确认",
+        date: "回查",
+        details: "已有合作归档，但当前需求和推进状态不清楚，需要确认是不是仍在工作台里占一个活动位置。"
+      }
+    ];
+
+    const customerTypeFilter = document.getElementById("customerTypeFilter");
+    const pageMeta = document.getElementById("pageMeta");
+    const metricGrid = document.getElementById("metricGrid");
+    const customerScopeBadge = document.getElementById("customerScopeBadge");
+    const customerGrid = document.getElementById("customerGrid");
+    const followupList = document.getElementById("followupList");
+    const missingList = document.getElementById("missingList");
+    const navButtons = document.querySelectorAll(".nav-button[data-page]");
+    const pageViews = document.querySelectorAll(".page[data-view]");
+    const captureModeTag = document.getElementById("captureModeTag");
+    const captureTargetContext = document.getElementById("captureTargetContext");
+    const captureCustomerName = document.getElementById("captureCustomerName");
+    const captureCustomerType = document.getElementById("captureCustomerType");
+    const captureCustomerStage = document.getElementById("captureCustomerStage");
+    const captureBusinessDirection = document.getElementById("captureBusinessDirection");
+    const captureContact = document.getElementById("captureContact");
+    const captureCurrentNeed = document.getElementById("captureCurrentNeed");
+    const captureRecentProgress = document.getElementById("captureRecentProgress");
+    const captureNextAction = document.getElementById("captureNextAction");
+    const captureCommunicationSummary = document.getElementById("captureCommunicationSummary");
+    let activeCustomerName = "爱慕";
+
+    function getCurrentFilter() {
+      return customerTypeFilter.value;
+    }
+
+    function resolveInitialFilter() {
+      const params = new URLSearchParams(window.location.search);
+      const requested = params.get("customerType");
+      const validValues = Array.from(customerTypeFilter.options).map((option) => option.value);
+      if (requested && validValues.includes(requested)) {
+        return requested;
+      }
+      return "all";
+    }
+
+    function resolveInitialPage() {
+      const params = new URLSearchParams(window.location.search);
+      const requested = params.get("page");
+      const validPages = Array.from(pageViews).map((page) => page.getAttribute("data-view"));
+      if (requested && validPages.includes(requested)) {
+        return requested;
+      }
+      return "overview";
+    }
+
+    function updateUrlParam(key, value) {
+      const url = new URL(window.location.href);
+      url.searchParams.set(key, value);
+      window.history.replaceState({}, "", url);
+    }
+
+    function activatePage(pageName, shouldUpdateUrl = true) {
+      pageViews.forEach((page) => {
+        page.classList.toggle("active", page.getAttribute("data-view") === pageName);
+      });
+      navButtons.forEach((button) => {
+        button.classList.toggle("active", button.getAttribute("data-page") === pageName);
+      });
+      if (shouldUpdateUrl) {
+        updateUrlParam("page", pageName);
+      }
+      document.querySelector(".workspace").scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function setCaptureModeGeneric() {
+      captureModeTag.textContent = "通用录入";
+      captureModeTag.className = "tag right";
+      captureTargetContext.querySelector(".info-title").textContent = "当前模式：通用录入";
+      captureTargetContext.querySelector(".info-copy").textContent = "从总览详情点“AI 更新此客户”后，这里会自动锁定为老客户更新。";
+      captureCustomerName.value = "";
+      captureCustomerType.value = "品牌客户";
+      captureCustomerStage.value = "潜客";
+      captureBusinessDirection.value = "";
+      captureContact.value = "";
+      captureCurrentNeed.value = "";
+      captureRecentProgress.value = "";
+      captureNextAction.value = "";
+      captureCommunicationSummary.value = "";
+    }
+
+    function setCaptureModeForCustomer(customerName) {
+      const customer = customers.find((item) => item.name === customerName);
+      if (!customer) {
+        setCaptureModeGeneric();
+        return;
+      }
+      captureModeTag.textContent = "老客户更新";
+      captureModeTag.className = "tag green right";
+      captureTargetContext.querySelector(".info-title").textContent = `当前模式：更新老客户「${customer.name}」`;
+      captureTargetContext.querySelector(".info-copy").textContent = "粘贴这位客户的最新聊天或推进情况，AI 只整理到表单，不会直接写入。";
+      captureCustomerName.value = customer.name;
+      captureCustomerType.value = customer.type;
+      captureCustomerStage.value = customer.stage;
+      captureBusinessDirection.value = customer.businessDirection;
+      captureContact.value = customer.contact;
+      captureCurrentNeed.value = customer.currentNeed;
+      captureRecentProgress.value = customer.focus;
+      captureNextAction.value = customer.nextAction;
+      captureCommunicationSummary.value = customer.communication.summary;
+    }
+
+    function filterByType(items) {
+      const currentFilter = getCurrentFilter();
+      if (currentFilter === "all") {
+        return items;
+      }
+      return items.filter((item) => item.type === currentFilter || item.customerType === currentFilter);
+    }
+
+    function formatFilterLabel() {
+      const currentFilter = getCurrentFilter();
+      return currentFilter === "all" ? "全部客户" : currentFilter;
+    }
+
+    function formatScopeBadgeLabel(count) {
+      const currentFilter = getCurrentFilter();
+      if (currentFilter === "all") {
+        return `当前 ${count} 个真实客户`;
+      }
+      return `当前 ${count} 个${currentFilter}`;
+    }
+
+    function renderMetrics(filteredCustomers) {
+      const pendingCount = filteredCustomers.filter((customer) => customer.stage === "潜客").length;
+      const activeCount = filteredCustomers.filter((customer) => customer.stage === "沟通中").length;
+      const cooperatedCount = filteredCustomers.filter((customer) => customer.stage === "已合作").length;
+      const followupCount = filteredCustomers.filter((customer) => Boolean(customer.nextAction)).length;
+
+      metricGrid.innerHTML = `
+        <div class="metric">
+          <div class="metric-label">潜客数</div>
+          <div class="metric-value">${pendingCount}</div>
+          <div class="metric-note"><span>${formatFilterLabel()}范围内的潜在客户</span><span class="tag gray">${pendingCount === 0 ? "待新增" : "可培育"}</span></div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">沟通中</div>
+          <div class="metric-value">${activeCount}</div>
+          <div class="metric-note"><span>当前还在推进中的客户</span><span class="tag amber">${activeCount === 0 ? "暂无" : "需跟进"}</span></div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">已合作</div>
+          <div class="metric-value">${cooperatedCount}</div>
+          <div class="metric-note"><span>已有合作或合同资料沉淀</span><span class="tag green">${cooperatedCount === 0 ? "暂无" : "有基础"}</span></div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">本周待跟进</div>
+          <div class="metric-value">${followupCount}</div>
+          <div class="metric-note"><span>${formatFilterLabel()}里仍可推进的动作</span><span class="tag">${followupCount === 0 ? "待录入" : "看右栏"}</span></div>
+        </div>
+      `;
+    }
+
+    function renderCustomers(activeName) {
+      const filteredCustomers = filterByType(customers);
+      customerScopeBadge.textContent = formatScopeBadgeLabel(filteredCustomers.length);
+
+      if (!filteredCustomers.length) {
+        customerGrid.innerHTML = `
+          <div class="empty-box" style="grid-column: 1 / -1;">
+            当前筛选为「${formatFilterLabel()}」，但一期真实数据里还没有可展示的客户页。
+            <br>
+            后续录入真实店群客户后，这里会直接按同样结构展示。
+          </div>
+        `;
+        return null;
+      }
+
+      const resolvedActiveName = filteredCustomers.some((customer) => customer.name === activeName)
+        ? activeName
+        : filteredCustomers[0].name;
+
+      customerGrid.innerHTML = filteredCustomers.map((customer) => `
+        <button class="customer-card ${customer.name === resolvedActiveName ? "active" : ""}" data-customer="${customer.name}">
+          <div class="customer-top">
+            <div>
+              <div class="customer-name">${customer.name}</div>
+              <div class="customer-type">${customer.type} · ${customer.businessDirection}</div>
+            </div>
+            <span class="tag ${customer.stageTag}">${customer.stage}</span>
+          </div>
+          <div class="customer-need">${customer.currentNeed}</div>
+          <div class="customer-bottom">
+            <div class="customer-next">下一步：${customer.nextAction}</div>
+            <div>${customer.updatedAt}</div>
+          </div>
+        </button>
+      `).join("");
+
+      customerGrid.querySelectorAll("[data-customer]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const name = button.getAttribute("data-customer");
+          renderCustomers(name);
+          renderDetail(name);
+        });
+      });
+
+      customerGrid.querySelectorAll("[data-customer]").forEach((button) => {
+        const name = button.getAttribute("data-customer");
+        button.classList.toggle("active", name === resolvedActiveName);
+      });
+
+      return resolvedActiveName;
+    }
+
+    function renderFollowups() {
+      const filteredFollowups = filterByType(followups);
+      if (!filteredFollowups.length) {
+        followupList.innerHTML = `<div class="empty-box">当前筛选下还没有需要展示的待跟进客户提醒。</div>`;
+        return;
+      }
+
+      followupList.innerHTML = filteredFollowups.map((item) => `
+        <div class="reminder-row">
+          <div class="reminder-main">
+            <span class="tag ${item.tag}">${item.tagText}</span>
+            <span class="reminder-title">${item.title}</span>
+            <span class="reminder-date">${item.date}</span>
+          </div>
+          <div class="reminder-details">${item.details}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderMissing() {
+      const filteredMissingItems = filterByType(missingItems);
+      if (!filteredMissingItems.length) {
+        missingList.innerHTML = `<div class="empty-box">当前筛选下还没有需要展示的资料缺口提醒。</div>`;
+        return;
+      }
+
+      missingList.innerHTML = filteredMissingItems.map((item) => `
+        <div class="missing-row">
+          <div class="missing-main">
+            <span class="tag ${item.tag}">${item.tagText}</span>
+            <span class="missing-title">${item.title}</span>
+            <span class="missing-date">${item.date}</span>
+          </div>
+          <div class="missing-details">${item.details}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderDetail(name) {
+      const filteredCustomers = filterByType(customers);
+      const customer = filteredCustomers.find((item) => item.name === name) || filteredCustomers[0];
+      if (!customer) {
+        activeCustomerName = "";
+        document.getElementById("detailName").textContent = "当前筛选下暂无客户";
+        document.getElementById("detailMeta").textContent = `${formatFilterLabel()} · 一期真实数据待补充`;
+        document.getElementById("detailNeed").textContent = "先通过快速录入补充真实客户后，这里会展示对应客户的需求、判断和沟通沉淀。";
+        document.getElementById("detailFocus").textContent = "当前没有可展示的客户判断。";
+        document.getElementById("detailNext").textContent = "建议先录入真实客户信息。";
+        document.getElementById("detailStage").textContent = "暂无";
+        document.getElementById("detailContact").textContent = "暂无";
+        document.getElementById("detailBudget").textContent = "暂无";
+        document.getElementById("detailCommDate").textContent = "暂无沟通";
+        document.getElementById("detailCommSummary").textContent = "当前筛选下还没有最近沟通沉淀。";
+        document.getElementById("detailCommNew").textContent = "暂无";
+        document.getElementById("detailCommRisk").textContent = "暂无";
+        document.getElementById("detailCommNext").textContent = "先录入真实客户。";
+        return;
+      }
+      activeCustomerName = customer.name;
+      document.getElementById("detailName").textContent = customer.name;
+      document.getElementById("detailMeta").textContent = `${customer.type} · ${customer.stage} · ${customer.businessDirection}`;
+      document.getElementById("detailNeed").textContent = customer.currentNeed;
+      document.getElementById("detailFocus").textContent = customer.focus;
+      document.getElementById("detailNext").textContent = customer.nextAction;
+      document.getElementById("detailStage").textContent = customer.stage;
+      document.getElementById("detailContact").textContent = customer.contact;
+      document.getElementById("detailBudget").textContent = customer.budget;
+      document.getElementById("detailCommDate").textContent = customer.communication.date;
+      document.getElementById("detailCommSummary").textContent = customer.communication.summary;
+      document.getElementById("detailCommNew").textContent = customer.communication.newInfo;
+      document.getElementById("detailCommRisk").textContent = customer.communication.risk;
+      document.getElementById("detailCommNext").textContent = customer.communication.next;
+    }
+
+    function renderDashboard(activeName) {
+      const filteredCustomers = filterByType(customers);
+      renderMetrics(filteredCustomers);
+      const resolvedActiveName = renderCustomers(activeName);
+      renderFollowups();
+      renderMissing();
+      renderDetail(resolvedActiveName);
+      pageMeta.textContent = `更新时间：2026-04-20 · 当前筛选：${formatFilterLabel()} · 一期口径：只使用当前客户页与客户总表已有字段`;
+    }
+
+    customerTypeFilter.addEventListener("change", () => {
+      updateUrlParam("customerType", customerTypeFilter.value);
+      renderDashboard(activeCustomerName);
+    });
+
+    navButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const pageName = button.getAttribute("data-page");
+        if (pageName === "capture") {
+          setCaptureModeGeneric();
+        }
+        activatePage(pageName);
+      });
+    });
+
+    document.querySelectorAll('[data-action="go-capture"]').forEach((button) => {
+      button.addEventListener("click", () => {
+        setCaptureModeGeneric();
+        activatePage("capture");
+      });
+    });
+
+    document.querySelectorAll('[data-action="go-overview"]').forEach((button) => {
+      button.addEventListener("click", () => {
+        activatePage("overview");
+      });
+    });
+
+    document.querySelectorAll('[data-action="update-active-customer"]').forEach((button) => {
+      button.addEventListener("click", () => {
+        setCaptureModeForCustomer(activeCustomerName);
+        activatePage("capture");
+      });
+    });
+
+    customerTypeFilter.value = resolveInitialFilter();
+    setCaptureModeGeneric();
+    renderDashboard("爱慕");
+    activatePage(resolveInitialPage(), false);
+  </script>
+</body>
+</html>

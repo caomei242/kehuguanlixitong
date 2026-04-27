@@ -7,7 +7,7 @@ from typing import Any
 
 from strawberry_customer_management.ai_capture import MINIMAX_BASE_URL, MINIMAX_DEFAULT_MODEL
 
-from strawberry_customer_management.paths import default_customer_root, default_main_work_root
+from strawberry_customer_management.paths import default_approval_inbox_root, default_customer_root, default_main_work_root, default_project_root
 
 
 class ConfigStore:
@@ -35,7 +35,9 @@ class ConfigStore:
 def default_config() -> dict[str, Any]:
     return {
         "customer_root": str(default_customer_root()),
+        "project_root": str(default_project_root()),
         "main_work_root": str(default_main_work_root()),
+        "approval_inbox_root": str(default_approval_inbox_root()),
         "ai_provider": "minimax",
         "minimax_api_key": "",
         "minimax_model": MINIMAX_DEFAULT_MODEL,
