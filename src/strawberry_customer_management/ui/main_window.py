@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date, timedelta
 import re
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QSize, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QStackedWidget,
     QVBoxLayout,
@@ -35,11 +38,12 @@ from strawberry_customer_management.config import ConfigStore
 from strawberry_customer_management.config import resolved_minimax_api_key
 from strawberry_customer_management.mcp_ocr_client import DEFAULT_MCP_COMMAND, McpOCRClient
 from strawberry_customer_management.markdown_store import MarkdownCustomerStore
-from strawberry_customer_management.models import CustomerDetail, CustomerDraft, PartyAInfo, ProjectDraft
+from strawberry_customer_management.models import CommunicationEntry, CustomerDetail, CustomerDraft, PartyAInfo, ProjectDetail, ProjectDraft
 from strawberry_customer_management.project_discovery import DesktopProjectDiscoveryService
 from strawberry_customer_management.project_store import MarkdownProjectStore
 from strawberry_customer_management.ui.app_icon import load_app_icon
 from strawberry_customer_management.ui.pages.overview_page import OverviewPage
+from strawberry_customer_management.ui.pages.customer_library_page import CustomerLibraryPage
 from strawberry_customer_management.ui.pages.project_management_page import ProjectManagementPage
 from strawberry_customer_management.ui.pages.quick_capture_page import QuickCapturePage
 from strawberry_customer_management.ui.pages.settings_page import SettingsPage
@@ -104,7 +108,25 @@ class ScreenshotOCRWorker(QObject):
             self.finished.emit()
 
 
+@dataclass(frozen=True)
+class FollowUpUndoState:
+    kind: str
+    message: str
+    customer_name: str
+    project_name: str = ""
+    customer_before: CustomerDetail | None = None
+    project_before: ProjectDetail | None = None
+
+
 class MainWindow(QMainWindow):
+    _NAV_ITEMS: tuple[tuple[str, str], ...] = (
+        ("客户总览", "本周跟进"),
+        ("客户库", "全部客户"),
+        ("快速录入", "新增与更新"),
+        ("项目管理", "项目与审批"),
+        ("设置", "系统配置"),
+    )
+
     def __init__(self, config_store: ConfigStore) -> None:
         super().__init__()
         self.setWindowTitle("草莓客户管理系统")
@@ -123,17 +145,24 @@ class MainWindow(QMainWindow):
         self._ocr_worker: ScreenshotOCRWorker | None = None
         self._approval_ocr_thread: QThread | None = None
         self._approval_ocr_worker: ScreenshotOCRWorker | None = None
+        self._nav_cards: list[QFrame] = []
+        self._last_follow_up_undo: FollowUpUndoState | None = None
 
         self.nav = QListWidget()
-        self.nav.addItems(["客户总览", "快速录入", "项目管理", "设置"])
-        self.nav.setFixedWidth(148)
+        self.nav.setObjectName("WorkbenchNav")
+        self.nav.setSpacing(8)
+        self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.nav.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._populate_navigation()
 
         self.stack = QStackedWidget()
         self.overview_page = OverviewPage()
+        self.customer_library_page = CustomerLibraryPage()
         self.quick_capture_page = QuickCapturePage()
         self.project_management_page = ProjectManagementPage()
         self.settings_page = SettingsPage()
         self.stack.addWidget(self.overview_page)
+        self.stack.addWidget(self.customer_library_page)
         self.stack.addWidget(self.quick_capture_page)
         self.stack.addWidget(self.project_management_page)
         self.stack.addWidget(self.settings_page)
@@ -142,7 +171,18 @@ class MainWindow(QMainWindow):
         self.overview_page.update_customer_requested.connect(self._prepare_existing_customer_update)
         self.overview_page.edit_customer_requested.connect(self._prepare_existing_customer_edit)
         self.overview_page.view_customer_projects_requested.connect(self._focus_customer_projects)
-        self.overview_page.quick_capture_requested.connect(lambda: self.nav.setCurrentRow(1))
+        self.overview_page.quick_capture_requested.connect(lambda: self.nav.setCurrentRow(2))
+        self.overview_page.customer_library_requested.connect(lambda: self.nav.setCurrentRow(1))
+        self.overview_page.customer_follow_up_action_requested.connect(self._handle_customer_follow_up_action)
+        self.overview_page.project_follow_up_action_requested.connect(self._handle_project_follow_up_action)
+        self.overview_page.undo_last_follow_up_action_requested.connect(self._undo_last_follow_up_action)
+        self.customer_library_page.customer_selected.connect(self._show_library_customer)
+        self.customer_library_page.update_customer_requested.connect(self._prepare_existing_customer_update)
+        self.customer_library_page.edit_customer_requested.connect(self._prepare_existing_customer_edit)
+        self.customer_library_page.archive_customer_requested.connect(lambda name: self._handle_customer_follow_up_action(name, "archive"))
+        self.customer_library_page.view_customer_projects_requested.connect(self._focus_customer_projects)
+        self.customer_library_page.overview_requested.connect(lambda: self.nav.setCurrentRow(0))
+        self.customer_library_page.quick_capture_requested.connect(lambda: self.nav.setCurrentRow(2))
         self.quick_capture_page.ai_extract_requested.connect(self._handle_ai_extract)
         self.quick_capture_page.screenshot_ocr_requested.connect(self._handle_screenshot_ocr)
         self.quick_capture_page.save_requested.connect(self._handle_capture_save)
@@ -158,49 +198,104 @@ class MainWindow(QMainWindow):
         self.settings_page.refresh_requested.connect(self._handle_settings_refresh)
         self.settings_page.validate_requested.connect(self._handle_settings_validate)
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.nav.currentRowChanged.connect(self._sync_navigation_state)
 
         brand_title = QLabel("草莓")
         brand_title.setObjectName("BrandTitle")
         brand_subtitle = QLabel("客户管理系统")
         brand_subtitle.setObjectName("BrandSubtitle")
+        brand_eyebrow = QLabel("STRAWBERRY WORKBENCH")
+        brand_eyebrow.setObjectName("SidebarEyebrow")
+        brand_hint = QLabel("")
+        brand_hint.setWordWrap(True)
+        brand_hint.setObjectName("SidebarSectionHint")
 
-        brand_box = QVBoxLayout()
-        brand_box.setContentsMargins(0, 0, 0, 0)
-        brand_box.setSpacing(2)
-        brand_box.addWidget(brand_title)
-        brand_box.addWidget(brand_subtitle)
+        brand_card = QFrame()
+        brand_card.setObjectName("SidebarBrandCard")
+        brand_layout = QVBoxLayout(brand_card)
+        brand_layout.setContentsMargins(16, 16, 16, 16)
+        brand_layout.setSpacing(8)
+        brand_layout.addWidget(brand_eyebrow)
+        brand_layout.addWidget(brand_title)
+        brand_layout.addWidget(brand_subtitle)
+        brand_layout.addWidget(brand_hint)
+
+        nav_section_title = QLabel("工作台导航")
+        nav_section_title.setObjectName("SidebarSectionTitle")
+        nav_section_hint = QLabel("")
+        nav_section_hint.setWordWrap(True)
+        nav_section_hint.setObjectName("SidebarSectionHint")
+
+        nav_card = QFrame()
+        nav_card.setObjectName("SidebarNavCard")
+        nav_card_layout = QVBoxLayout(nav_card)
+        nav_card_layout.setContentsMargins(14, 14, 14, 14)
+        nav_card_layout.setSpacing(12)
+        nav_card_layout.addWidget(nav_section_title)
+        nav_card_layout.addWidget(nav_section_hint)
+        nav_card_layout.addWidget(self.nav)
 
         sidebar = QFrame()
         sidebar.setObjectName("WindowSidebar")
+        sidebar.setFixedWidth(272)
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(18, 18, 18, 18)
-        sidebar_layout.setSpacing(16)
-        sidebar_layout.addLayout(brand_box)
-        sidebar_layout.addWidget(self.nav)
-        sidebar_layout.addStretch(1)
+        sidebar_layout.setSpacing(14)
+        sidebar_layout.addWidget(brand_card)
+        sidebar_layout.addWidget(nav_card, 1)
+        profile_card = QFrame()
+        profile_card.setObjectName("SidebarProfileCard")
+        profile_layout = QVBoxLayout(profile_card)
+        profile_layout.setContentsMargins(14, 14, 14, 14)
+        profile_layout.setSpacing(10)
+        profile_top = QHBoxLayout()
+        profile_top.setContentsMargins(0, 0, 0, 0)
+        profile_top.setSpacing(10)
+        profile_avatar = QLabel("莓")
+        profile_avatar.setObjectName("SidebarAvatar")
+        profile_meta = QVBoxLayout()
+        profile_meta.setContentsMargins(0, 0, 0, 0)
+        profile_meta.setSpacing(2)
+        profile_name = QLabel("草莓工作台")
+        profile_name.setObjectName("SidebarProfileName")
+        profile_role = QLabel("")
+        profile_role.setObjectName("SidebarProfileRole")
+        profile_meta.addWidget(profile_name)
+        profile_meta.addWidget(profile_role)
+        profile_top.addWidget(profile_avatar, 0, Qt.AlignmentFlag.AlignTop)
+        profile_top.addLayout(profile_meta, 1)
+        profile_badge = QLabel("已连接主业资料库")
+        profile_badge.setObjectName("SidebarProfileBadge")
+        profile_meta_line = QLabel("")
+        profile_meta_line.setWordWrap(True)
+        profile_meta_line.setObjectName("SidebarProfileMeta")
+        profile_layout.addLayout(profile_top)
+        profile_layout.addWidget(profile_badge)
+        profile_layout.addWidget(profile_meta_line)
+        sidebar_layout.addWidget(profile_card)
 
         content = QFrame()
         content.setObjectName("WindowContentShell")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setContentsMargins(18, 18, 18, 18)
         content_layout.addWidget(self.stack)
 
         body = QWidget()
         body_layout = QHBoxLayout(body)
         body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(0)
+        body_layout.setSpacing(12)
         body_layout.addWidget(sidebar)
         body_layout.addWidget(content, 1)
 
         shell = QFrame()
         shell.setObjectName("WindowShell")
         shell_layout = QVBoxLayout(shell)
-        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setContentsMargins(12, 12, 12, 12)
         shell_layout.addWidget(body)
 
         root = QWidget()
         root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(18, 18, 18, 18)
+        root_layout.setContentsMargins(20, 20, 20, 20)
         root_layout.addWidget(shell)
         self.setCentralWidget(root)
 
@@ -212,16 +307,72 @@ class MainWindow(QMainWindow):
             self._config.get("minimax_api_key", ""),
             self._config.get("minimax_model", ""),
             self._config.get("minimax_base_url", ""),
+            self._config.get("customer_types", []),
+            self._config.get("secondary_tags", []),
         )
+        self._apply_option_config()
         self.project_management_page.set_approval_inbox_path(str(self._config.get("approval_inbox_root", "")))
         self.nav.setCurrentRow(0)
         self._reload_customers()
         self._reload_projects()
 
+    def _populate_navigation(self) -> None:
+        for index, (title, subtitle) in enumerate(self._NAV_ITEMS, start=1):
+            item = QListWidgetItem(title)
+            item.setSizeHint(QSize(0, 60))
+            self.nav.addItem(item)
+            card = self._build_navigation_card(index, title, subtitle)
+            self.nav.setItemWidget(item, card)
+            self._nav_cards.append(card)
+
+    def _build_navigation_card(self, index: int, title: str, subtitle: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("NavCard")
+        card.setProperty("current", False)
+
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
+
+        index_label = QLabel(f"{index:02d}")
+        index_label.setObjectName("NavCardIndex")
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(1)
+        title_label = QLabel(title)
+        title_label.setObjectName("NavCardTitle")
+        subtitle_label = QLabel(subtitle)
+        subtitle_label.setObjectName("NavCardSubtitle")
+        subtitle_label.setWordWrap(True)
+        text_layout.addWidget(title_label)
+        text_layout.addWidget(subtitle_label)
+
+        layout.addWidget(index_label, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(text_layout, 1)
+        return card
+
+    def _sync_navigation_state(self, current_row: int) -> None:
+        for index, card in enumerate(self._nav_cards):
+            is_current = index == current_row
+            if card.property("current") == is_current:
+                continue
+            card.setProperty("current", is_current)
+            self._refresh_styles(card)
+
+    def _refresh_styles(self, widget: QWidget) -> None:
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        for child in widget.findChildren(QWidget):
+            child.style().unpolish(child)
+            child.style().polish(child)
+        widget.update()
+
     def _reload_customers(self, selected_name: str | None = None) -> None:
         records = self._store.list_customers()
-        self.overview_page.set_focus_customers(self._store.list_focus_customers())
+        self.overview_page.set_focus_customers(records)
         self.overview_page.set_customers(records, selected_name=selected_name)
+        self.customer_library_page.set_customers(records, selected_name=selected_name)
         self.quick_capture_page.set_status(f"当前共加载 {len(records)} 个客户。")
 
     def _reload_projects(
@@ -230,6 +381,7 @@ class MainWindow(QMainWindow):
         selected_project: tuple[str, str] | None = None,
     ) -> None:
         records = self._project_store.list_projects()
+        self.overview_page.set_follow_up_projects(records)
         self.project_management_page.set_projects(records, selected_brand=selected_brand, selected_project=selected_project)
         active_key = selected_project or self.project_management_page.selected_project_key()
         if active_key:
@@ -247,6 +399,14 @@ class MainWindow(QMainWindow):
         self.overview_page.show_customer_detail(detail)
         self.overview_page.set_related_projects(self._project_store.list_projects_for_brand(detail.name), detail.customer_type)
 
+    def _show_library_customer(self, name: str) -> None:
+        try:
+            detail = self._store.get_customer(name)
+        except KeyError:
+            self.customer_library_page.show_customer_detail(None)
+            return
+        self.customer_library_page.show_customer_detail(detail)
+
     def _show_project(self, brand_customer_name: str, project_name: str) -> None:
         try:
             detail = self._project_store.get_project(brand_customer_name, project_name)
@@ -256,11 +416,155 @@ class MainWindow(QMainWindow):
         self.project_management_page.set_project_detail(detail)
 
     def _focus_customer_projects(self, customer_name: str) -> None:
-        self.nav.setCurrentRow(2)
+        self.nav.setCurrentRow(3)
         self.project_management_page.focus_brand(customer_name)
         active_key = self.project_management_page.selected_project_key()
         if active_key:
             self._show_project(*active_key)
+
+    def _handle_customer_follow_up_action(self, name: str, action: str) -> None:
+        try:
+            detail = self._store.get_customer(name)
+        except KeyError:
+            QMessageBox.warning(self, "客户不存在", f"没有找到客户「{name}」。")
+            return
+        today = date.today().isoformat()
+        next_follow_up_date = detail.next_follow_up_date
+        next_action = detail.next_action
+        stage = detail.stage
+        summary = ""
+        recent_progress = detail.recent_progress
+        if action == "complete":
+            next_follow_up_date = " "
+            next_action = " "
+            recent_progress = "已完成本次跟进"
+            summary = "已完成本次跟进"
+        elif action.startswith("reschedule:"):
+            next_follow_up_date = action.split(":", 1)[1].strip()
+            summary = f"已改期到 {next_follow_up_date}"
+        elif action == "tomorrow":
+            next_follow_up_date = (date.today() + timedelta(days=1)).isoformat()
+            summary = f"已改期到 {next_follow_up_date}"
+        elif action == "unschedule":
+            next_follow_up_date = ""
+            summary = "已改为待排期"
+        elif action == "suspend":
+            stage = "暂缓"
+            next_follow_up_date = ""
+            next_action = "已转暂缓，后续有新触发再推进"
+            summary = "已转暂缓"
+        elif action == "archive":
+            stage = "已归档"
+            next_follow_up_date = "已归档"
+            next_action = "已结束并收档，后续仅做历史查询"
+            summary = "已收档"
+        else:
+            return
+        draft = self._customer_draft_from_detail(
+            detail,
+            stage=stage,
+            recent_progress=recent_progress,
+            next_action=next_action,
+            next_follow_up_date=next_follow_up_date,
+            communication=CommunicationEntry(entry_date=today, summary=summary, next_step=next_action),
+            updated_at=today,
+        )
+        updated = self._store.upsert_customer(draft)
+        self._set_last_follow_up_undo(
+            FollowUpUndoState(
+                kind="customer",
+                message=f"{detail.name} · {summary}",
+                customer_name=detail.name,
+                customer_before=detail,
+            )
+        )
+        self._reload_customers(selected_name=updated.name)
+        self._reload_projects(selected_brand=updated.name)
+        self.overview_page.show_customer_detail(updated)
+        self.customer_library_page.show_customer_detail(updated)
+
+    def _handle_project_follow_up_action(self, brand_customer_name: str, project_name: str, action: str) -> None:
+        try:
+            detail = self._project_store.get_project(brand_customer_name, project_name)
+        except KeyError:
+            QMessageBox.warning(self, "项目不存在", f"没有找到项目「{brand_customer_name}/{project_name}」。")
+            return
+        today = date.today().isoformat()
+        next_follow_up_date = detail.next_follow_up_date
+        next_action = detail.next_action
+        stage = detail.stage
+        notes = detail.notes_markdown
+        action_label = "更新"
+        if action == "complete":
+            next_follow_up_date = " "
+            next_action = " "
+            notes = _append_note(notes, f"- {today}：已完成本次项目跟进。")
+            action_label = "已完成本次项目跟进"
+        elif action.startswith("reschedule:"):
+            next_follow_up_date = action.split(":", 1)[1].strip()
+            notes = _append_note(notes, f"- {today}：项目跟进已改期到 {next_follow_up_date}。")
+            action_label = f"已改到 {next_follow_up_date}"
+        elif action == "tomorrow":
+            next_follow_up_date = (date.today() + timedelta(days=1)).isoformat()
+            notes = _append_note(notes, f"- {today}：项目跟进已改期到 {next_follow_up_date}。")
+            action_label = f"已改到 {next_follow_up_date}"
+        elif action == "unschedule":
+            next_follow_up_date = ""
+            notes = _append_note(notes, f"- {today}：项目改为待排期。")
+            action_label = "已改为待排期"
+        elif action == "suspend":
+            stage = "暂缓"
+            next_follow_up_date = ""
+            next_action = "已转暂缓，后续有新触发再推进"
+            notes = _append_note(notes, f"- {today}：项目已转暂缓。")
+            action_label = "已转暂缓"
+        elif action == "archive":
+            stage = "已归档"
+            next_follow_up_date = "已归档"
+            next_action = "已结束并收档，后续仅做历史查询"
+            notes = _append_note(notes, f"- {today}：项目已收档。")
+            action_label = "已收档"
+        else:
+            return
+        draft = ProjectDraft(
+            brand_customer_name=detail.brand_customer_name,
+            project_name=detail.project_name,
+            stage=stage,
+            original_project_name=detail.project_name,
+            year=detail.year,
+            project_type=detail.project_type,
+            current_focus=detail.current_focus,
+            next_action=next_action,
+            next_follow_up_date=next_follow_up_date,
+            risk=detail.risk,
+            customer_page_link=detail.customer_page_link,
+            main_work_path=detail.main_work_path,
+            path_status=detail.path_status,
+            party_a_source=detail.party_a_source,
+            default_party_a_info=detail.default_party_a_info,
+            party_a_info=detail.party_a_info,
+            override_party_a=detail.party_a_source.startswith("项目覆盖"),
+            participant_roles=detail.participant_roles,
+            participant_roles_markdown=detail.participant_roles_markdown,
+            progress_nodes=detail.progress_nodes,
+            progress_markdown=detail.progress_markdown,
+            materials_markdown=detail.materials_markdown,
+            notes_markdown=notes,
+            approval_entries=detail.approval_entries,
+            latest_approval_status=detail.latest_approval_status,
+            updated_at=today,
+        )
+        updated = self._project_store.upsert_project(draft)
+        self._set_last_follow_up_undo(
+            FollowUpUndoState(
+                kind="project",
+                message=f"{detail.project_name} · {action_label}",
+                customer_name=detail.brand_customer_name,
+                project_name=detail.project_name,
+                project_before=detail,
+            )
+        )
+        self._reload_projects(selected_brand=updated.brand_customer_name, selected_project=(updated.brand_customer_name, updated.project_name))
 
     def _handle_capture_save(self, draft: CustomerDraft) -> None:
         if not draft.name:
@@ -306,6 +610,7 @@ class MainWindow(QMainWindow):
             project_type=draft.project_type,
             current_focus=draft.current_focus,
             next_action=draft.next_action,
+            next_follow_up_date=draft.next_follow_up_date,
             risk=draft.risk,
             customer_page_link=draft.customer_page_link or f"[[客户/客户--{draft.brand_customer_name}]]",
             main_work_path=draft.main_work_path,
@@ -314,6 +619,10 @@ class MainWindow(QMainWindow):
             default_party_a_info=default_party_a if not default_party_a.is_empty() else (existing_detail.default_party_a_info if existing_detail else PartyAInfo()),
             party_a_info=draft.party_a_info,
             override_party_a=draft.override_party_a,
+            participant_roles=draft.participant_roles or (existing_detail.participant_roles if existing_detail else []),
+            participant_roles_markdown=draft.participant_roles_markdown or (existing_detail.participant_roles_markdown if existing_detail else ""),
+            progress_nodes=draft.progress_nodes or (existing_detail.progress_nodes if existing_detail else []),
+            progress_markdown=draft.progress_markdown or (existing_detail.progress_markdown if existing_detail else ""),
             materials_markdown=draft.materials_markdown or (existing_detail.materials_markdown if existing_detail else ""),
             notes_markdown=draft.notes_markdown,
             approval_entries=draft.approval_entries or (existing_detail.approval_entries if existing_detail else []),
@@ -333,6 +642,37 @@ class MainWindow(QMainWindow):
             self._show_customer(detail.brand_customer_name)
         self.project_management_page.set_status(f"项目「{detail.project_name}」已写入 Obsidian 项目工作台。")
 
+    def _set_last_follow_up_undo(self, state: FollowUpUndoState) -> None:
+        self._last_follow_up_undo = state
+        self.overview_page.show_undo_action(state.message)
+
+    def _clear_last_follow_up_undo(self) -> None:
+        self._last_follow_up_undo = None
+        self.overview_page.clear_undo_action()
+
+    def _undo_last_follow_up_action(self) -> None:
+        state = self._last_follow_up_undo
+        if state is None:
+            self.overview_page.clear_undo_action()
+            return
+        if state.kind == "customer" and state.customer_before is not None:
+            restored = self._store.upsert_customer(self._customer_draft_from_detail(state.customer_before))
+            self._reload_customers(selected_name=restored.name)
+            self._reload_projects(selected_brand=restored.name)
+            self.overview_page.show_customer_detail(restored)
+            self.customer_library_page.show_customer_detail(restored)
+        elif state.kind == "project" and state.project_before is not None:
+            restored = self._project_store.upsert_project(self._project_draft_from_detail(state.project_before))
+            self._reload_projects(
+                selected_brand=restored.brand_customer_name,
+                selected_project=(restored.brand_customer_name, restored.project_name),
+            )
+            self._reload_customers(selected_name=restored.brand_customer_name)
+            self._show_customer(restored.brand_customer_name)
+        else:
+            return
+        self._clear_last_follow_up_undo()
+
     def _handle_project_sync(self) -> None:
         main_work_root = Path(self._config["main_work_root"])
         discovery = DesktopProjectDiscoveryService(main_work_root)
@@ -342,7 +682,7 @@ class MainWindow(QMainWindow):
         selected_customer = ""
         try:
             for record in self._store.list_customers():
-                if record.customer_type != "品牌客户":
+                if not _has_customer_type(record.customer_type, "品牌客户"):
                     continue
                 try:
                     detail = self._store.get_customer(record.name)
@@ -362,6 +702,7 @@ class MainWindow(QMainWindow):
                         project_type=project_draft.project_type,
                         current_focus=project_draft.current_focus,
                         next_action=project_draft.next_action,
+                        next_follow_up_date=project_draft.next_follow_up_date,
                         risk=project_draft.risk,
                         customer_page_link=project_draft.customer_page_link,
                         main_work_path=project_draft.main_work_path,
@@ -370,6 +711,10 @@ class MainWindow(QMainWindow):
                         default_party_a_info=detail.party_a_info,
                         party_a_info=project_draft.party_a_info,
                         override_party_a=project_draft.override_party_a,
+                        participant_roles=project_draft.participant_roles,
+                        participant_roles_markdown=project_draft.participant_roles_markdown,
+                        progress_nodes=project_draft.progress_nodes,
+                        progress_markdown=project_draft.progress_markdown,
                         materials_markdown=project_draft.materials_markdown,
                         notes_markdown=project_draft.notes_markdown,
                         approval_entries=project_draft.approval_entries,
@@ -558,7 +903,7 @@ class MainWindow(QMainWindow):
         api_key = resolved_minimax_api_key(self._config)
         if not api_key:
             QMessageBox.warning(self, "缺少 MiniMax Key", "请先在设置页填写 MiniMax API Key，或设置 MINIMAX_API_KEY 环境变量。")
-            self.nav.setCurrentRow(3)
+            self.nav.setCurrentRow(4)
             return
 
         client = McpOCRClient(
@@ -607,7 +952,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "客户不存在", f"没有找到客户「{name}」。")
             return
         self.quick_capture_page.prepare_existing_customer_update(detail)
-        self.nav.setCurrentRow(1)
+        self.nav.setCurrentRow(2)
 
     def _prepare_existing_customer_edit(self, name: str) -> None:
         try:
@@ -616,7 +961,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "客户不存在", f"没有找到客户「{name}」。")
             return
         self.quick_capture_page.prepare_manual_customer_edit(detail)
-        self.nav.setCurrentRow(1)
+        self.nav.setCurrentRow(2)
 
     def _handle_ai_extract(self, raw_text: str, target_customer_name: str = "") -> None:
         if not raw_text:
@@ -628,12 +973,14 @@ class MainWindow(QMainWindow):
         api_key = resolved_minimax_api_key(self._config)
         if not api_key:
             QMessageBox.warning(self, "缺少 MiniMax Key", "请先在设置页填写 MiniMax API Key，或设置 MINIMAX_API_KEY 环境变量。")
-            self.nav.setCurrentRow(3)
+            self.nav.setCurrentRow(4)
             return
         client = MiniMaxCaptureClient(
             api_key=api_key,
             model=str(self._config.get("minimax_model", "")),
             base_url=str(self._config.get("minimax_base_url", "")),
+            customer_types=list(self._config.get("customer_types", [])),
+            secondary_tags=list(self._config.get("secondary_tags", [])),
         )
         existing_customers = [record.name for record in self._store.list_customers()]
         worker = AICaptureWorker(
@@ -670,7 +1017,7 @@ class MainWindow(QMainWindow):
         api_key = resolved_minimax_api_key(self._config)
         if not api_key:
             QMessageBox.warning(self, "缺少 MiniMax Key", "请先在设置页填写 MiniMax API Key，或设置 MINIMAX_API_KEY 环境变量。")
-            self.nav.setCurrentRow(3)
+            self.nav.setCurrentRow(4)
             return
 
         client = McpOCRClient(
@@ -735,8 +1082,9 @@ class MainWindow(QMainWindow):
         self._project_store = MarkdownProjectStore(Path(self._config["project_root"]))
         self._approval_inbox_scanner = ApprovalInboxScanner(Path(self._config["approval_inbox_root"]))
         self.project_management_page.set_approval_inbox_path(str(self._config["approval_inbox_root"]))
+        self._apply_option_config()
         route_label = self._describe_minimax_route(str(self._config.get("minimax_base_url", "")).strip())
-        self.settings_page.set_status(f"设置已保存。当前 MiniMax 口径：{route_label}。")
+        self.settings_page.set_status(f"设置已保存。当前 MiniMax 口径：{route_label}；分类选项已刷新。")
         self._reload_customers()
         self._reload_projects()
 
@@ -752,6 +1100,8 @@ class MainWindow(QMainWindow):
         approval_inbox_root = Path(self.settings_page.approval_inbox_root_edit.text().strip())
         current_minimax_key = self.settings_page.minimax_api_key_edit.text().strip() or resolved_minimax_api_key(self._config)
         current_minimax_base_url = self.settings_page.minimax_base_url_edit.text().strip() or str(self._config.get("minimax_base_url", "")).strip()
+        customer_types = self.settings_page.customer_types_edit.toPlainText().splitlines()
+        secondary_tags = self.settings_page.secondary_tags_edit.toPlainText().splitlines()
         messages = [
             f"客户管理路径：{'存在' if customer_root.exists() else '不存在'}",
             f"项目数据路径：{'存在' if project_root.exists() else '不存在'}",
@@ -760,8 +1110,17 @@ class MainWindow(QMainWindow):
             f"MiniMax Key：{'已配置' if current_minimax_key else '未配置'}",
             f"MiniMax 口径：{self._describe_minimax_route(current_minimax_base_url)}",
             f"MiniMax Base URL：{current_minimax_base_url or '未配置'}",
+            f"客户类型选项：{len([item for item in customer_types if item.strip()])} 个",
+            f"二级标签选项：{len([item for item in secondary_tags if item.strip()])} 个",
         ]
         self.settings_page.set_status("；".join(messages))
+
+    def _apply_option_config(self) -> None:
+        customer_types = list(self._config.get("customer_types", []))
+        secondary_tags = list(self._config.get("secondary_tags", []))
+        self.quick_capture_page.set_option_lists(customer_types, secondary_tags)
+        self.overview_page.set_customer_type_options(customer_types)
+        self.customer_library_page.set_customer_type_options(customer_types)
 
     @staticmethod
     def _customer_draft_from_detail(detail: CustomerDetail, **overrides: str) -> CustomerDraft:
@@ -778,9 +1137,11 @@ class MainWindow(QMainWindow):
             "main_work_path": detail.main_work_path,
             "external_material_path": detail.external_material_path,
             "shop_scale": detail.shop_scale,
+            "secondary_tags": detail.secondary_tags,
             "current_need": detail.current_need,
             "recent_progress": detail.recent_progress,
             "next_action": detail.next_action,
+            "next_follow_up_date": detail.next_follow_up_date,
             "party_a_brand": detail.party_a_brand,
             "party_a_company": detail.party_a_company,
             "party_a_contact": detail.party_a_contact,
@@ -793,6 +1154,37 @@ class MainWindow(QMainWindow):
         }
         values.update(overrides)
         return CustomerDraft(**values)
+
+    @staticmethod
+    def _project_draft_from_detail(project: ProjectDetail) -> ProjectDraft:
+        return ProjectDraft(
+            brand_customer_name=project.brand_customer_name,
+            project_name=project.project_name,
+            original_project_name=project.project_name,
+            stage=project.stage,
+            year=project.year,
+            project_type=project.project_type,
+            current_focus=project.current_focus,
+            next_action=project.next_action,
+            next_follow_up_date=project.next_follow_up_date,
+            risk=project.risk,
+            customer_page_link=project.customer_page_link,
+            main_work_path=project.main_work_path,
+            path_status=project.path_status,
+            party_a_source=project.party_a_source,
+            default_party_a_info=project.default_party_a_info,
+            party_a_info=project.party_a_info,
+            override_party_a=project.party_a_source.startswith("项目覆盖"),
+            participant_roles=project.participant_roles,
+            participant_roles_markdown=project.participant_roles_markdown,
+            progress_nodes=project.progress_nodes,
+            progress_markdown=project.progress_markdown,
+            materials_markdown=project.materials_markdown,
+            notes_markdown=project.notes_markdown,
+            approval_entries=project.approval_entries,
+            latest_approval_status=project.latest_approval_status,
+            updated_at=project.updated_at,
+        )
 
     @staticmethod
     def _describe_minimax_route(base_url: str) -> str:
@@ -844,6 +1236,13 @@ def _image_reference_candidates(raw_text: str) -> list[Path]:
     return paths
 
 
+def _append_note(existing: str, line: str) -> str:
+    text = (existing or "").strip()
+    if not text or text == "- 待补项目沉淀":
+        return line
+    return f"{line}\n{text}"
+
+
 def _path_from_image_reference(value: str) -> Path | None:
     cleaned = value.strip().strip("'\"<>，。；;")
     if not cleaned:
@@ -856,6 +1255,10 @@ def _path_from_image_reference(value: str) -> Path | None:
     if cleaned.startswith("~") or cleaned.startswith("/"):
         return Path(unquote(cleaned)).expanduser()
     return None
+
+
+def _has_customer_type(value: str, customer_type: str) -> bool:
+    return customer_type in [part.strip() for part in re.split(r"\s*/\s*|[，,、]", value) if part.strip()]
 
 
 def _approval_inbox_file_text(file: ApprovalInboxFile) -> str:

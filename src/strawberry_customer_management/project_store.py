@@ -12,6 +12,7 @@ from strawberry_customer_management.markdown_store import (
     _clean_cell,
     _ensure_section,
     _extract_wikilink_target,
+    _format_markdown_row,
     _is_separator_row,
     _replace_or_add_bullet,
     _replace_section_body,
@@ -21,7 +22,15 @@ from strawberry_customer_management.markdown_store import (
     sort_project_records,
     summarize_approval_entry,
 )
-from strawberry_customer_management.models import ApprovalEntry, PartyAInfo, ProjectDetail, ProjectDraft, ProjectRecord
+from strawberry_customer_management.models import (
+    ApprovalEntry,
+    PartyAInfo,
+    ProjectDetail,
+    ProjectDraft,
+    ProjectProgressNode,
+    ProjectRecord,
+    ProjectRole,
+)
 from strawberry_customer_management.paths import default_project_root
 
 
@@ -41,9 +50,18 @@ def _safe_file_stem(value: str) -> str:
 def _format_summary_row(record: ProjectRecord) -> str:
     return (
         f"| {record.brand_customer_name} | {record.project_name} | {record.stage} | {record.year} | "
-        f"{record.project_type} | {record.current_focus} | {record.next_action} | {record.main_work_path} | "
+        f"{record.project_type} | {record.current_focus} | {record.next_action} | {_next_follow_up_date(record)} | {record.main_work_path} | "
         f"[[项目/{record.brand_customer_name}/项目--{_safe_file_stem(record.project_name)}]] | {record.updated_at} |"
     )
+
+
+def _next_follow_up_date(value: object) -> str:
+    return str(getattr(value, "next_follow_up_date", "") or "").strip()
+
+
+def _with_next_follow_up_date(value, next_follow_up_date: str):
+    object.__setattr__(value, "next_follow_up_date", next_follow_up_date)
+    return value
 
 
 def _parse_table(section: str) -> list[dict[str, str]]:
@@ -56,6 +74,8 @@ def _parse_table(section: str) -> list[dict[str, str]]:
         cells = [_clean_cell(cell) for cell in line.strip().strip("|").split("|")]
         if _is_separator_row(cells):
             continue
+        if "下次跟进日期" in header and len(cells) == len(header) - 1:
+            cells.insert(header.index("下次跟进日期"), "")
         if len(cells) < len(header):
             cells.extend([""] * (len(header) - len(cells)))
         rows.append(dict(zip(header, cells)))
@@ -88,6 +108,172 @@ def _party_a_section_default() -> str:
     )
 
 
+def _clean_optional_value(value: str) -> str:
+    normalized = value.strip()
+    if normalized in PLACEHOLDER_VALUES or normalized == "--":
+        return ""
+    return normalized
+
+
+def _structured_section_parts(section: str) -> tuple[list[tuple[str, str]], str]:
+    blocks: list[tuple[str, str]] = []
+    extras: list[str] = []
+    last_index = 0
+    for match in re.finditer(r"^### (?P<head>.+?)\n(?P<body>.*?)(?=^### |\Z)", section, flags=re.M | re.S):
+        extras.append(section[last_index : match.start()])
+        blocks.append((match.group("head").strip(), match.group("body")))
+        last_index = match.end()
+    extras.append(section[last_index:])
+    return blocks, "".join(extras).strip()
+
+
+def _split_structured_block_body(body: str, allowed_keys: set[str]) -> tuple[str, str]:
+    structured_lines: list[str] = []
+    extra_lines: list[str] = []
+    collecting_extra = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        match = re.match(r"^-\s*([^：:]+)[：:]", stripped)
+        key = match.group(1).strip() if match else ""
+        is_structured_line = stripped == "" or (match is not None and key in allowed_keys)
+        if collecting_extra or not is_structured_line:
+            collecting_extra = True
+            extra_lines.append(line)
+            continue
+        structured_lines.append(line)
+    return "\n".join(structured_lines), "\n".join(extra_lines).strip()
+
+
+def _project_role_section_default() -> str:
+    return "- 暂无参与角色"
+
+
+def _project_progress_section_default() -> str:
+    return "- 暂无项目进度"
+
+
+def _parse_participant_roles(section: str) -> tuple[list[ProjectRole], str]:
+    blocks, extras = _structured_section_parts(section)
+    roles: list[ProjectRole] = []
+    block_extras: list[str] = []
+    allowed_keys = {"角色", "职责", "备注"}
+    for head, body in blocks:
+        structured_body, trailing_extra = _split_structured_block_body(body, allowed_keys)
+        data = _bullet_map(structured_body)
+        name = head
+        role_from_head = ""
+        if " · " in head:
+            name, role_from_head = [part.strip() for part in head.split(" · ", 1)]
+        note = _clean_optional_value(data.get("备注", ""))
+        if not note:
+            extra_lines = [line.strip() for line in structured_body.splitlines() if line.strip() and not re.match(r"^-\s*[^：:]+[：:]", line.strip())]
+            note = "\n".join(extra_lines).strip()
+        if trailing_extra:
+            block_extras.append(trailing_extra)
+        roles.append(
+            ProjectRole(
+                name=name.strip(),
+                role=_clean_optional_value(data.get("角色", "") or role_from_head),
+                responsibility=_clean_optional_value(data.get("职责", "")),
+                note=note,
+            )
+        )
+    extra_markdown = "\n\n".join([part for part in [extras, *block_extras] if part.strip()]).strip()
+    if extra_markdown == _project_role_section_default():
+        extra_markdown = ""
+    return roles, extra_markdown
+
+
+def _format_participant_roles(roles: list[ProjectRole], extra_markdown: str) -> str:
+    parts: list[str] = []
+    if roles:
+        parts.append(
+            "\n\n".join(
+                [
+                    "\n".join(
+                        [
+                            f"### {role.name.strip() or '待补角色'}",
+                            f"- 角色：{role.role or '待补充'}",
+                            f"- 职责：{role.responsibility or '待补充'}",
+                            f"- 备注：{role.note or '待补充'}",
+                        ]
+                    )
+                    for role in roles
+                ]
+            )
+        )
+    normalized_extra = extra_markdown.strip()
+    if normalized_extra and normalized_extra != _project_role_section_default():
+        parts.append(normalized_extra)
+    if not parts:
+        return _project_role_section_default() + "\n"
+    return "\n\n".join(parts).rstrip() + "\n"
+
+
+def _parse_progress_nodes(section: str) -> tuple[list[ProjectProgressNode], str]:
+    blocks, extras = _structured_section_parts(section)
+    nodes: list[ProjectProgressNode] = []
+    block_extras: list[str] = []
+    allowed_keys = {"状态", "节点状态", "负责人", "协作人", "配合人", "衔接人", "计划日期", "计划", "完成日期", "完成", "风险", "卡点", "说明", "当前状态", "进展", "留痕", "下一步"}
+    for head, body in blocks:
+        structured_body, trailing_extra = _split_structured_block_body(body, allowed_keys)
+        data = _bullet_map(structured_body)
+        note = _clean_optional_value(data.get("说明", "") or data.get("当前状态", "") or data.get("进展", "") or data.get("留痕", ""))
+        if not note:
+            extra_lines = [line.strip() for line in structured_body.splitlines() if line.strip() and not re.match(r"^-\s*[^：:]+[：:]", line.strip())]
+            note = "\n".join(extra_lines).strip()
+        if trailing_extra:
+            block_extras.append(trailing_extra)
+        nodes.append(
+            ProjectProgressNode(
+                node_name=head.strip(),
+                status=_clean_optional_value(data.get("状态", "") or data.get("节点状态", "")),
+                owner=_clean_optional_value(data.get("负责人", "")),
+                collaborators=_clean_optional_value(data.get("协作人", "") or data.get("配合人", "") or data.get("衔接人", "")),
+                planned_date=_clean_optional_value(data.get("计划日期", "") or data.get("计划", "")),
+                completed_date=_clean_optional_value(data.get("完成日期", "") or data.get("完成", "")),
+                risk=_clean_optional_value(data.get("风险", "") or data.get("卡点", "")),
+                note=note,
+                next_action=_clean_optional_value(data.get("下一步", "")),
+            )
+        )
+    extra_markdown = "\n\n".join([part for part in [extras, *block_extras] if part.strip()]).strip()
+    if extra_markdown == _project_progress_section_default():
+        extra_markdown = ""
+    return nodes, extra_markdown
+
+
+def _format_progress_nodes(nodes: list[ProjectProgressNode], extra_markdown: str) -> str:
+    parts: list[str] = []
+    if nodes:
+        parts.append(
+            "\n\n".join(
+                [
+                    "\n".join(
+                        [
+                            f"### {node.node_name.strip() or '待补进度节点'}",
+                            f"- 状态：{node.status or '待补充'}",
+                            f"- 负责人：{node.owner or '待补充'}",
+                            f"- 协作人：{node.collaborators or '待补充'}",
+                            f"- 计划日期：{node.planned_date or '待补充'}",
+                            f"- 完成日期：{node.completed_date or '待补充'}",
+                            f"- 风险：{node.risk or '待补充'}",
+                            f"- 说明：{node.note or '待补充'}",
+                            f"- 下一步：{node.next_action or '待补充'}",
+                        ]
+                    )
+                    for node in nodes
+                ]
+            )
+        )
+    normalized_extra = extra_markdown.strip()
+    if normalized_extra and normalized_extra != _project_progress_section_default():
+        parts.append(normalized_extra)
+    if not parts:
+        return _project_progress_section_default() + "\n"
+    return "\n\n".join(parts).rstrip() + "\n"
+
+
 class MarkdownProjectStore:
     def __init__(self, root: Path | None = None) -> None:
         self.root = root or default_project_root()
@@ -111,20 +297,23 @@ class MarkdownProjectStore:
                 target = _extract_wikilink_target(page_link)
                 page_path = self.root / f"{target}.md"
             records.append(
-                ProjectRecord(
-                    brand_customer_name=brand_name,
-                    project_name=project_name,
-                    stage=row.get("项目状态", "").strip(),
-                    year=row.get("年份", "").strip(),
-                    project_type=row.get("项目类型", "").strip(),
-                    current_focus=row.get("当前重点", "").strip(),
-                    next_action=row.get("下一步", "").strip(),
-                    main_work_path=row.get("主业项目路径", "").strip(),
-                    page_link=page_link,
-                    updated_at=row.get("更新时间", "").strip(),
-                    page_path=page_path,
-                    path_status="主业路径有效" if Path(row.get("主业项目路径", "").strip()).exists() else "主业路径失效",
-                    latest_approval_status=self._read_latest_approval_status(page_path),
+                _with_next_follow_up_date(
+                    ProjectRecord(
+                        brand_customer_name=brand_name,
+                        project_name=project_name,
+                        stage=row.get("项目状态", "").strip(),
+                        year=row.get("年份", "").strip(),
+                        project_type=row.get("项目类型", "").strip(),
+                        current_focus=row.get("当前重点", "").strip(),
+                        next_action=row.get("下一步", "").strip(),
+                        main_work_path=row.get("主业项目路径", "").strip(),
+                        page_link=page_link,
+                        updated_at=row.get("更新时间", "").strip(),
+                        page_path=page_path,
+                        path_status="主业路径有效" if Path(row.get("主业项目路径", "").strip()).exists() else "主业路径失效",
+                        latest_approval_status=self._read_latest_approval_status(page_path),
+                    ),
+                    row.get("下次跟进日期", "").strip(),
                 )
             )
         return sort_project_records(records)
@@ -166,33 +355,42 @@ class MarkdownProjectStore:
         )
         override_enabled = party_a.get("是否项目覆盖", "") == "是"
         effective_party_a = override_party_a.resolved_with(default_party_a) if override_enabled else default_party_a
+        participant_roles, participant_roles_markdown = _parse_participant_roles(_section_body(text, "参与角色"))
+        progress_nodes, progress_markdown = _parse_progress_nodes(_section_body(text, "项目进度"))
         materials_markdown = _section_body(text, "资料概览").strip()
         notes_markdown = _section_body(text, "项目沉淀").strip()
         approval_entries = sort_approval_entries(_parse_approval_entries(text, "审批记录"))
         main_work_path = basic.get("主业项目路径", "")
-        return ProjectDetail(
-            brand_customer_name=basic.get("关联客户", "") or basic.get("品牌客户", brand_customer_name),
-            project_name=basic.get("项目名称", project_name),
-            stage=basic.get("项目状态", ""),
-            year=basic.get("所属年份", ""),
-            project_type=basic.get("项目类型", ""),
-            current_focus=judgement.get("当前重点", ""),
-            next_action=judgement.get("下一步", ""),
-            main_work_path=main_work_path,
-            page_link=f"[[项目/{brand_customer_name}/项目--{_safe_file_stem(project_name)}]]",
-            updated_at=judgement.get("更新时间", ""),
-            page_path=path,
-            path_status=basic.get("主业路径状态", "主业路径失效" if main_work_path and not Path(main_work_path).exists() else "主业路径有效"),
-            latest_approval_status=summarize_approval_entry(approval_entries[0] if approval_entries else None),
-            customer_page_link=basic.get("关联客户页", ""),
-            risk=judgement.get("风险提醒", ""),
-            party_a_source="项目覆盖甲方信息" if override_enabled else party_a.get("默认来源", ""),
-            default_party_a_info=default_party_a,
-            party_a_info=effective_party_a,
-            materials_markdown=materials_markdown,
-            notes_markdown=notes_markdown,
-            approval_entries=approval_entries,
-            raw_text=text,
+        return _with_next_follow_up_date(
+            ProjectDetail(
+                brand_customer_name=basic.get("关联客户", "") or basic.get("品牌客户", brand_customer_name),
+                project_name=basic.get("项目名称", project_name),
+                stage=basic.get("项目状态", ""),
+                year=basic.get("所属年份", ""),
+                project_type=basic.get("项目类型", ""),
+                current_focus=judgement.get("当前重点", ""),
+                next_action=judgement.get("下一步", ""),
+                main_work_path=main_work_path,
+                page_link=f"[[项目/{brand_customer_name}/项目--{_safe_file_stem(project_name)}]]",
+                updated_at=judgement.get("更新时间", ""),
+                page_path=path,
+                path_status=basic.get("主业路径状态", "主业路径失效" if main_work_path and not Path(main_work_path).exists() else "主业路径有效"),
+                latest_approval_status=summarize_approval_entry(approval_entries[0] if approval_entries else None),
+                customer_page_link=basic.get("关联客户页", ""),
+                risk=judgement.get("风险提醒", ""),
+                party_a_source="项目覆盖甲方信息" if override_enabled else party_a.get("默认来源", ""),
+                default_party_a_info=default_party_a,
+                party_a_info=effective_party_a,
+                participant_roles=participant_roles,
+                participant_roles_markdown=participant_roles_markdown,
+                progress_nodes=progress_nodes,
+                progress_markdown=progress_markdown,
+                materials_markdown=materials_markdown,
+                notes_markdown=notes_markdown,
+                approval_entries=approval_entries,
+                raw_text=text,
+            ),
+            judgement.get("下次跟进日期", ""),
         )
 
     def upsert_project(self, draft: ProjectDraft) -> ProjectDetail:
@@ -239,27 +437,34 @@ class MarkdownProjectStore:
             return self.upsert_project(draft)
         existing = self.get_project(draft.brand_customer_name, draft.project_name)
         override_enabled = existing.party_a_source.startswith("项目覆盖") or existing.party_a_info != existing.default_party_a_info
-        merged = ProjectDraft(
-            brand_customer_name=draft.brand_customer_name,
-            project_name=draft.project_name,
-            stage=existing.stage if existing.stage not in PLACEHOLDER_VALUES else draft.stage,
-            original_project_name=existing.project_name,
-            year=draft.year or existing.year,
-            project_type=existing.project_type if existing.project_type not in PLACEHOLDER_VALUES else draft.project_type,
-            current_focus=existing.current_focus if existing.current_focus not in PLACEHOLDER_VALUES else draft.current_focus,
-            next_action=existing.next_action if existing.next_action not in PLACEHOLDER_VALUES else draft.next_action,
-            risk=existing.risk if existing.risk not in PLACEHOLDER_VALUES else draft.risk,
-            customer_page_link=draft.customer_page_link or existing.customer_page_link,
-            main_work_path=draft.main_work_path or existing.main_work_path,
-            path_status=draft.path_status or existing.path_status,
-            party_a_source="项目覆盖甲方信息" if override_enabled else draft.party_a_source,
-            default_party_a_info=draft.default_party_a_info or existing.default_party_a_info,
-            party_a_info=existing.party_a_info if override_enabled else PartyAInfo(),
-            override_party_a=override_enabled,
-            materials_markdown=draft.materials_markdown or existing.materials_markdown,
-            notes_markdown=existing.notes_markdown or draft.notes_markdown,
-            approval_entries=existing.approval_entries or draft.approval_entries,
-            updated_at=draft.updated_at,
+        merged = _with_next_follow_up_date(
+            ProjectDraft(
+                brand_customer_name=draft.brand_customer_name,
+                project_name=draft.project_name,
+                stage=existing.stage if existing.stage not in PLACEHOLDER_VALUES else draft.stage,
+                original_project_name=existing.project_name,
+                year=draft.year or existing.year,
+                project_type=existing.project_type if existing.project_type not in PLACEHOLDER_VALUES else draft.project_type,
+                current_focus=existing.current_focus if existing.current_focus not in PLACEHOLDER_VALUES else draft.current_focus,
+                next_action=existing.next_action if existing.next_action not in PLACEHOLDER_VALUES else draft.next_action,
+                risk=existing.risk if existing.risk not in PLACEHOLDER_VALUES else draft.risk,
+                customer_page_link=draft.customer_page_link or existing.customer_page_link,
+                main_work_path=draft.main_work_path or existing.main_work_path,
+                path_status=draft.path_status or existing.path_status,
+                party_a_source="项目覆盖甲方信息" if override_enabled else draft.party_a_source,
+                default_party_a_info=draft.default_party_a_info or existing.default_party_a_info,
+                party_a_info=existing.party_a_info if override_enabled else PartyAInfo(),
+                override_party_a=override_enabled,
+                participant_roles=draft.participant_roles or existing.participant_roles,
+                participant_roles_markdown=draft.participant_roles_markdown or existing.participant_roles_markdown,
+                progress_nodes=draft.progress_nodes or existing.progress_nodes,
+                progress_markdown=draft.progress_markdown or existing.progress_markdown,
+                materials_markdown=draft.materials_markdown or existing.materials_markdown,
+                notes_markdown=existing.notes_markdown or draft.notes_markdown,
+                approval_entries=existing.approval_entries or draft.approval_entries,
+                updated_at=draft.updated_at,
+            ),
+            _next_follow_up_date(existing) if _next_follow_up_date(existing) not in PLACEHOLDER_VALUES else _next_follow_up_date(draft),
         )
         return self.upsert_project(merged)
 
@@ -297,11 +502,18 @@ class MarkdownProjectStore:
 - 项目覆盖电子邮箱：{draft.party_a_info.email or "待补充"}
 - 项目覆盖通讯地址：{draft.party_a_info.address or "待补充"}
 
+## 参与角色
+{_format_participant_roles(draft.participant_roles, draft.participant_roles_markdown)}
+
 ## 当前判断
 - 当前重点：{draft.current_focus or "已同步桌面项目资料，待补项目当前重点"}
 - 下一步：{draft.next_action or "补充项目当前重点、下一步和风险判断"}
+- 下次跟进日期：{_next_follow_up_date(draft) or "待确认"}
 - 风险提醒：{draft.risk or "待补充"}
 - 更新时间：{updated_at}
+
+## 项目进度
+{_format_progress_nodes(draft.progress_nodes, draft.progress_markdown)}
 
 ## 审批记录
 {_format_approval_section(draft.approval_entries, "- 暂无审批记录")}
@@ -315,7 +527,9 @@ class MarkdownProjectStore:
 
     def _ensure_project_sections(self, text: str) -> str:
         text = _ensure_section(text, "甲方信息", _party_a_section_default())
+        text = _ensure_section(text, "参与角色", _project_role_section_default())
         text = _ensure_section(text, "审批记录", "- 暂无审批记录")
+        text = _ensure_section(text, "项目进度", _project_progress_section_default())
         text = _ensure_section(text, "资料概览", "- 待同步桌面项目资料")
         text = _ensure_section(text, "项目沉淀", "- 待补项目沉淀")
         return text
@@ -348,38 +562,48 @@ class MarkdownProjectStore:
             ("甲方信息", "项目覆盖通讯地址", draft.party_a_info.address),
             ("当前判断", "当前重点", draft.current_focus),
             ("当前判断", "下一步", draft.next_action),
+            ("当前判断", "下次跟进日期", draft.next_follow_up_date if draft.next_follow_up_date != "" else "待确认"),
             ("当前判断", "风险提醒", draft.risk),
             ("当前判断", "更新时间", updated_at),
         ]
         for section, key, value in updates:
             text = _replace_or_add_bullet(text, section, key, value)
+        text = _replace_section_body(text, "参与角色", _format_participant_roles(draft.participant_roles, draft.participant_roles_markdown))
+        text = _replace_section_body(text, "项目进度", _format_progress_nodes(draft.progress_nodes, draft.progress_markdown))
         text = _replace_section_body(text, "资料概览", f"{draft.materials_markdown.rstrip()}\n" if draft.materials_markdown else "- 待同步桌面项目资料\n")
         text = _replace_section_body(text, "项目沉淀", f"{draft.notes_markdown.rstrip()}\n" if draft.notes_markdown else "- 待补项目沉淀\n")
         return text
 
     def append_approval_entry(self, brand_customer_name: str, project_name: str, entry: ApprovalEntry) -> ProjectDetail:
         detail = self.get_project(brand_customer_name, project_name)
-        draft = ProjectDraft(
-            brand_customer_name=detail.brand_customer_name,
-            project_name=detail.project_name,
-            original_project_name=detail.project_name,
-            stage=detail.stage,
-            year=detail.year,
-            project_type=detail.project_type,
-            current_focus=detail.current_focus,
-            next_action=detail.next_action,
-            risk=detail.risk,
-            customer_page_link=detail.customer_page_link,
-            main_work_path=detail.main_work_path,
-            path_status=detail.path_status,
-            party_a_source=detail.party_a_source,
-            default_party_a_info=detail.default_party_a_info,
-            party_a_info=detail.party_a_info if detail.party_a_source.startswith("项目覆盖") else PartyAInfo(),
-            override_party_a=detail.party_a_source.startswith("项目覆盖"),
-            materials_markdown=detail.materials_markdown,
-            notes_markdown=detail.notes_markdown,
-            approval_entries=_merge_approval_entries(detail.approval_entries, [entry]),
-            updated_at=entry.entry_date,
+        draft = _with_next_follow_up_date(
+            ProjectDraft(
+                brand_customer_name=detail.brand_customer_name,
+                project_name=detail.project_name,
+                original_project_name=detail.project_name,
+                stage=detail.stage,
+                year=detail.year,
+                project_type=detail.project_type,
+                current_focus=detail.current_focus,
+                next_action=detail.next_action,
+                risk=detail.risk,
+                customer_page_link=detail.customer_page_link,
+                main_work_path=detail.main_work_path,
+                path_status=detail.path_status,
+                party_a_source=detail.party_a_source,
+                default_party_a_info=detail.default_party_a_info,
+                party_a_info=detail.party_a_info if detail.party_a_source.startswith("项目覆盖") else PartyAInfo(),
+                override_party_a=detail.party_a_source.startswith("项目覆盖"),
+                participant_roles=detail.participant_roles,
+                participant_roles_markdown=detail.participant_roles_markdown,
+                progress_nodes=detail.progress_nodes,
+                progress_markdown=detail.progress_markdown,
+                materials_markdown=detail.materials_markdown,
+                notes_markdown=detail.notes_markdown,
+                approval_entries=_merge_approval_entries(detail.approval_entries, [entry]),
+                updated_at=entry.entry_date,
+            ),
+            _next_follow_up_date(detail),
         )
         return self.upsert_project(draft)
 
@@ -417,18 +641,21 @@ class MarkdownProjectStore:
         original_project_name = draft.original_project_name.strip()
         if original_project_name and original_project_name != draft.project_name:
             text = self._remove_row_in_section(text, PROJECT_SUMMARY_SECTION, draft.brand_customer_name, original_project_name)
-        record = ProjectRecord(
-            brand_customer_name=draft.brand_customer_name,
-            project_name=draft.project_name,
-            stage=draft.stage,
-            year=draft.year,
-            project_type=draft.project_type,
-            current_focus=draft.current_focus,
-            next_action=draft.next_action,
-            main_work_path=draft.main_work_path,
-            updated_at=updated_at,
-            page_link=f"[[项目/{draft.brand_customer_name}/项目--{_safe_file_stem(draft.project_name)}]]",
-            path_status=draft.path_status,
+        record = _with_next_follow_up_date(
+            ProjectRecord(
+                brand_customer_name=draft.brand_customer_name,
+                project_name=draft.project_name,
+                stage=draft.stage,
+                year=draft.year,
+                project_type=draft.project_type,
+                current_focus=draft.current_focus,
+                next_action=draft.next_action,
+                main_work_path=draft.main_work_path,
+                updated_at=updated_at,
+                page_link=f"[[项目/{draft.brand_customer_name}/项目--{_safe_file_stem(draft.project_name)}]]",
+                path_status=draft.path_status,
+            ),
+            _next_follow_up_date(draft),
         )
         text = self._upsert_row_in_section(text, PROJECT_SUMMARY_SECTION, draft.brand_customer_name, draft.project_name, _format_summary_row(record))
         text = re.sub(r"^更新时间：.*$", f"更新时间：{updated_at}", text, count=1, flags=re.M)
@@ -440,7 +667,52 @@ class MarkdownProjectStore:
         text = re.sub(r"^\| 品牌客户 \|", "| 关联客户 |", text, count=1, flags=re.M)
         if not _section_body(text, PROJECT_SUMMARY_SECTION):
             text = _ensure_section(text, PROJECT_SUMMARY_SECTION, self._default_project_table_body())
+        text = self._ensure_summary_next_follow_up_date_column(text)
         return text
+
+    def _ensure_summary_next_follow_up_date_column(self, text: str) -> str:
+        body = _section_body(text, PROJECT_SUMMARY_SECTION)
+        lines = body.splitlines()
+        table_indexes = [index for index, line in enumerate(lines) if line.strip().startswith("|")]
+        if len(table_indexes) < 2:
+            return text
+        header_index = table_indexes[0]
+        separator_index = table_indexes[1]
+        header = _split_markdown_row(lines[header_index])
+        if "下一步" not in header:
+            return text
+        changed = False
+        if "下次跟进日期" in header:
+            insert_index = header.index("下次跟进日期")
+        else:
+            insert_index = header.index("下一步") + 1
+            header.insert(insert_index, "下次跟进日期")
+            lines[header_index] = _format_markdown_row(header)
+            changed = True
+        separator = _split_markdown_row(lines[separator_index])
+        if _is_separator_row(separator):
+            if len(separator) == len(header) - 1:
+                separator.insert(insert_index, "---")
+                changed = True
+            elif len(separator) < len(header):
+                separator.extend(["---"] * (len(header) - len(separator)))
+                changed = True
+            lines[separator_index] = _format_markdown_row(separator)
+        for row_index in table_indexes[2:]:
+            cells = _split_markdown_row(lines[row_index])
+            if _is_separator_row(cells):
+                continue
+            if len(cells) == len(header) - 1:
+                cells.insert(insert_index, "")
+                changed = True
+            elif len(cells) < len(header):
+                cells.extend([""] * (len(header) - len(cells)))
+                changed = True
+            if changed:
+                lines[row_index] = _format_markdown_row(cells)
+        if not changed:
+            return text
+        return _replace_section_body(text, PROJECT_SUMMARY_SECTION, "\n".join(lines).rstrip() + "\n")
 
     def _remove_row_in_section(self, text: str, section_name: str, brand_name: str, project_name: str) -> str:
         body = _section_body(text, section_name)
@@ -498,8 +770,8 @@ class MarkdownProjectStore:
 {self._default_project_table_body()}"""
 
     def _default_project_table_body(self) -> str:
-        return """| 关联客户 | 项目名称 | 项目状态 | 年份 | 项目类型 | 当前重点 | 下一步 | 主业项目路径 | 对应项目页 | 更新时间 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+        return """| 关联客户 | 项目名称 | 项目状态 | 年份 | 项目类型 | 当前重点 | 下一步 | 下次跟进日期 | 主业项目路径 | 对应项目页 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 """
 
     def _default_unassigned_approvals_text(self) -> str:

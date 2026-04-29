@@ -23,7 +23,7 @@ class DesktopProjectDiscoveryService:
         self.brand_projects_root = self.main_work_root / "品牌项目"
 
     def discover_for_customer(self, detail: CustomerDetail) -> ProjectDiscoveryResult:
-        if detail.customer_type != "品牌客户":
+        if not _has_customer_type(detail.customer_type, "品牌客户"):
             return ProjectDiscoveryResult()
         brand_path = self._resolve_brand_path(detail)
         if brand_path is None:
@@ -112,6 +112,10 @@ class DesktopProjectDiscoveryService:
 
 def path_is_year_dir(path: Path) -> bool:
     return path.is_dir() and (YEAR_DIR_PATTERN.fullmatch(path.name) is not None or path.name == "待确认年份")
+
+
+def _has_customer_type(value: str, customer_type: str) -> bool:
+    return customer_type in [part.strip() for part in re.split(r"\s*/\s*|[，,、]", value) if part.strip()]
 
 
 def infer_project_type(project_name: str, year_label: str) -> str:

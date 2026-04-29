@@ -5,9 +5,23 @@ from datetime import date
 from pathlib import Path
 
 
-CUSTOMER_TYPES = ("品牌客户", "网店KA客户", "网店店群客户")
-PROJECT_CUSTOMER_TYPES = ("品牌客户", "网店KA客户")
-CUSTOMER_STAGES = ("潜客", "沟通中", "已合作", "暂缓")
+CUSTOMER_TYPES = ("品牌客户", "网店KA客户", "网店店群客户", "博主")
+PROJECT_CUSTOMER_TYPES = ("品牌客户", "网店KA客户", "博主")
+SECONDARY_TAGS = (
+    "小时达",
+    "微信",
+    "AI商品图",
+    "AI详情页",
+    "抖店",
+    "小红书",
+    "天猫",
+    "短视频",
+    "直播",
+    "图文",
+    "内容种草",
+    "集采点数",
+)
+CUSTOMER_STAGES = ("潜客", "沟通中", "已合作", "暂缓", "已归档")
 PROJECT_STAGES = ("待确认", "推进中", "已归档", "暂缓")
 PROJECT_TYPES = (
     "待补充",
@@ -16,6 +30,7 @@ PROJECT_TYPES = (
     "图文项目",
     "小红书项目",
     "KA客户运营",
+    "博主推广",
     "品牌资料",
     "授权资料",
     "其他项目",
@@ -79,14 +94,37 @@ class PartyAInfo:
 
 
 @dataclass(frozen=True)
+class ProjectRole:
+    name: str
+    role: str = ""
+    responsibility: str = ""
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class ProjectProgressNode:
+    node_name: str
+    status: str = ""
+    owner: str = ""
+    collaborators: str = ""
+    planned_date: str = ""
+    completed_date: str = ""
+    risk: str = ""
+    note: str = ""
+    next_action: str = ""
+
+
+@dataclass(frozen=True)
 class CustomerRecord:
     name: str
     customer_type: str
     stage: str
+    secondary_tags: str = ""
     business_direction: str = ""
     current_need: str = ""
     recent_progress: str = ""
     next_action: str = ""
+    next_follow_up_date: str = ""
     contact: str = ""
     page_link: str = ""
     updated_at: str = ""
@@ -140,6 +178,7 @@ class CustomerDraft:
     customer_type: str
     stage: str
     original_name: str = ""
+    secondary_tags: str = ""
     business_direction: str = ""
     contact: str = ""
     phone: str = ""
@@ -152,6 +191,7 @@ class CustomerDraft:
     current_need: str = ""
     recent_progress: str = ""
     next_action: str = ""
+    next_follow_up_date: str = ""
     party_a_brand: str = ""
     party_a_company: str = ""
     party_a_contact: str = ""
@@ -191,6 +231,7 @@ class ProjectRecord:
     project_type: str = ""
     current_focus: str = ""
     next_action: str = ""
+    next_follow_up_date: str = ""
     page_link: str = ""
     updated_at: str = ""
     main_work_path: str = ""
@@ -206,6 +247,10 @@ class ProjectDetail(ProjectRecord):
     party_a_source: str = ""
     default_party_a_info: PartyAInfo = field(default_factory=PartyAInfo)
     party_a_info: PartyAInfo = field(default_factory=PartyAInfo)
+    participant_roles: list[ProjectRole] = field(default_factory=list)
+    participant_roles_markdown: str = ""
+    progress_nodes: list[ProjectProgressNode] = field(default_factory=list)
+    progress_markdown: str = ""
     materials_markdown: str = ""
     notes_markdown: str = ""
     approval_entries: list[ApprovalEntry] = field(default_factory=list)
@@ -222,6 +267,7 @@ class ProjectDraft:
     project_type: str = ""
     current_focus: str = ""
     next_action: str = ""
+    next_follow_up_date: str = ""
     risk: str = ""
     customer_page_link: str = ""
     main_work_path: str = ""
@@ -230,6 +276,10 @@ class ProjectDraft:
     default_party_a_info: PartyAInfo = field(default_factory=PartyAInfo)
     party_a_info: PartyAInfo = field(default_factory=PartyAInfo)
     override_party_a: bool = False
+    participant_roles: list[ProjectRole] = field(default_factory=list)
+    participant_roles_markdown: str = ""
+    progress_nodes: list[ProjectProgressNode] = field(default_factory=list)
+    progress_markdown: str = ""
     materials_markdown: str = ""
     notes_markdown: str = ""
     approval_entries: list[ApprovalEntry] = field(default_factory=list)

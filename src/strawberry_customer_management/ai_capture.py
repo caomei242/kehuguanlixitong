@@ -5,10 +5,10 @@ import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Protocol
 
-from strawberry_customer_management.models import CommunicationEntry, CustomerDraft, CUSTOMER_STAGES, CUSTOMER_TYPES
+from strawberry_customer_management.models import CommunicationEntry, CustomerDraft, CUSTOMER_STAGES, CUSTOMER_TYPES, SECONDARY_TAGS
 
 
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
@@ -57,12 +57,16 @@ class MiniMaxCaptureClient:
         base_url: str = MINIMAX_BASE_URL,
         timeout: float = 60,
         transport: JsonTransport | None = None,
+        customer_types: list[str] | tuple[str, ...] | None = None,
+        secondary_tags: list[str] | tuple[str, ...] | None = None,
     ) -> None:
         self.api_key = api_key.strip()
         self.model = model.strip() or MINIMAX_DEFAULT_MODEL
         self.base_url = base_url.rstrip("/") or MINIMAX_BASE_URL
         self.timeout = timeout
         self.transport = transport or UrllibJsonTransport()
+        self.customer_types = tuple(customer_types or CUSTOMER_TYPES)
+        self.secondary_tags = tuple(secondary_tags or SECONDARY_TAGS)
 
     def extract_draft(
         self,
@@ -110,6 +114,8 @@ class MiniMaxCaptureClient:
             raw_text=raw_text,
             today=today or date.today().isoformat(),
             target_customer_name=target_customer_name,
+            customer_types=self.customer_types,
+            secondary_tags=self.secondary_tags,
         )
 
     def _build_payload(
@@ -121,6 +127,8 @@ class MiniMaxCaptureClient:
     ) -> dict[str, Any]:
         known_customers = "、".join(existing_customers[:80]) or "暂无"
         target_hint = f"当前正在更新的老客户：{target_customer_name.strip()}\n" if target_customer_name and target_customer_name.strip() else ""
+        customer_type_options = " / ".join(self.customer_types)
+        secondary_tag_options = " / ".join(self.secondary_tags)
         system_prompt = (
             "你是一个中文客户管理录入助手。你的任务是把用户粘贴的客户聊天、需求或推进情况，"
             "整理成草莓客户管理系统的表单字段。只输出一个 JSON 对象，不要输出解释。"
@@ -132,16 +140,19 @@ class MiniMaxCaptureClient:
 字段要求：
 - 客户名称：必须尽量提取，老客户要使用已存在客户里的同名或最接近名称。
 - 如果提供了“当前正在更新的老客户”，客户名称必须严格返回这个名称，不要改写或加后缀。
-- 不要把联系人姓名、微信昵称或缩写昵称直接当成客户名称。品牌客户优先用品牌名；网店KA客户优先用具体店铺/账号名；网店店群客户优先用店群主体、店铺类型或业务标识命名。
-- 客户类型：只能是 品牌客户 / 网店KA客户 / 网店店群客户。
-- 阶段：只能是 潜客 / 沟通中 / 已合作 / 暂缓。
-- 业务方向：品牌客户常见为 种草 / 视频拍摄 / 品牌推广 / 网店采买；网店KA客户常见为 KA版 / AI裂变 / AI详情页 / 功能跟进；网店店群客户常见为 集采点数 / 店铺软件批量采购。
+- 不要把联系人姓名、微信昵称或缩写昵称直接当成客户名称。品牌客户优先用品牌名；网店KA客户优先用具体店铺/账号名；网店店群客户优先用店群主体、店铺类型或业务标识命名；博主优先用博主昵称、账号名或沟通群里的对外称呼。
+- 客户类型：可以多选，选项只能来自 {customer_type_options}；用 “ / ” 分隔，例如：博主 / 网店店群客户。
+- 阶段：只能是 潜客 / 沟通中 / 已合作 / 暂缓 / 已归档。
+- 业务方向：品牌客户常见为 种草 / 视频拍摄 / 品牌推广 / 网店采买；网店KA客户常见为 KA版 / AI裂变 / AI详情页 / 功能跟进；网店店群客户常见为 集采点数 / 店铺软件批量采购；博主常见为 新功能推广 / 新产品推广 / 内容合作 / 小时达与微信生态推广。
+- 二级标签：可以多选，选项优先来自 {secondary_tag_options}；用 “ / ” 分隔。
+- 如果一个对象既是推广者又是软件使用者，不要二选一；客户类型直接多选，例如：博主 / 网店店群客户。小时达、微信这类渠道/场景只放二级标签。
 - 手机号、联系电话、微信号尽量提取；没有提到的信息输出空字符串。
+- 下次跟进日期：如有“明天、后天、下周一、3天后”等相对日期，必须结合今天日期转换成 YYYY-MM-DD 绝对日期；没有明确日期输出空字符串。
 - 没有提到的信息输出空字符串，不要编造。
 - 同一天多轮聊天要合并成一句有效结论。
 
 只返回这些键：
-客户名称、客户类型、阶段、业务方向、联系人、手机号、微信号、所属主体、店铺规模、当前需求、最近推进、下次动作、沟通日期、沟通结论、新增信息、风险顾虑、下一步
+客户名称、客户类型、二级标签、阶段、业务方向、联系人、手机号、微信号、所属主体、店铺规模、当前需求、最近推进、下次动作、下次跟进日期、沟通日期、沟通结论、新增信息、风险顾虑、下一步
 
 客户原文：
 {raw_text.strip()}"""
@@ -161,11 +172,15 @@ def draft_from_ai_json(
     raw_text: str = "",
     today: str | None = None,
     target_customer_name: str | None = None,
+    customer_types: list[str] | tuple[str, ...] | None = None,
+    secondary_tags: list[str] | tuple[str, ...] | None = None,
 ) -> CustomerDraft:
     payload = _load_json_object(content)
     current_date = today or date.today().isoformat()
     forced_name = target_customer_name.strip() if target_customer_name else ""
-    customer_type = _choice(_value(payload, "客户类型"), CUSTOMER_TYPES, "品牌客户")
+    allowed_customer_types = tuple(customer_types or CUSTOMER_TYPES)
+    allowed_secondary_tags = tuple(secondary_tags or SECONDARY_TAGS)
+    customer_type = _multi_choice(_value(payload, "客户类型"), allowed_customer_types, _first_or_default(allowed_customer_types, "品牌客户"))
     contact = _value(payload, "联系人")
     phone = _value(payload, "手机号") or _value(payload, "联系电话") or _extract_phone_number(raw_text)
     wechat_id = _value(payload, "微信号") or _extract_wechat_id(raw_text)
@@ -186,6 +201,7 @@ def draft_from_ai_json(
         name=resolved_name,
         customer_type=customer_type,
         stage=_choice(_value(payload, "阶段"), CUSTOMER_STAGES, "潜客"),
+        secondary_tags=_multi_choice(_value(payload, "二级标签"), allowed_secondary_tags, ""),
         business_direction=_value(payload, "业务方向"),
         contact=contact,
         phone=phone,
@@ -195,6 +211,7 @@ def draft_from_ai_json(
         current_need=_value(payload, "当前需求"),
         recent_progress=_value(payload, "最近推进"),
         next_action=_value(payload, "下次动作") or communication.next_step,
+        next_follow_up_date=_normalize_follow_up_date(_value(payload, "下次跟进日期"), current_date),
         communication=communication,
     )
 
@@ -238,6 +255,63 @@ def _choice(value: str, choices: tuple[str, ...], fallback: str) -> str:
     return value if value in choices else fallback
 
 
+def _split_multi_value(value: str) -> list[str]:
+    return [part.strip() for part in re.split(r"\s*/\s*|[，,、]", value) if part.strip()]
+
+
+def _multi_choice(value: str, choices: tuple[str, ...], fallback: str) -> str:
+    selected: list[str] = []
+    for part in _split_multi_value(value):
+        if part in choices and part not in selected:
+            selected.append(part)
+    if not selected and fallback:
+        selected.append(fallback)
+    return " / ".join(selected)
+
+
+def _first_or_default(values: tuple[str, ...], fallback: str) -> str:
+    return values[0] if values else fallback
+
+
+def _normalize_follow_up_date(value: str, today: str) -> str:
+    raw_value = value.strip()
+    if not raw_value:
+        return ""
+    iso_match = re.search(r"20\d{2}-\d{1,2}-\d{1,2}", raw_value)
+    if iso_match:
+        parts = [int(part) for part in iso_match.group(0).split("-")]
+        return date(parts[0], parts[1], parts[2]).isoformat()
+    try:
+        base_date = date.fromisoformat(today)
+    except ValueError:
+        return raw_value
+
+    relative_days = {
+        "今天": 0,
+        "明天": 1,
+        "后天": 2,
+        "大后天": 3,
+    }
+    if raw_value in relative_days:
+        return (base_date + timedelta(days=relative_days[raw_value])).isoformat()
+
+    days_later_match = re.search(r"(\d+)\s*天后", raw_value)
+    if days_later_match:
+        return (base_date + timedelta(days=int(days_later_match.group(1)))).isoformat()
+
+    next_week_match = re.search(r"下周([一二三四五六日天])", raw_value)
+    if next_week_match:
+        weekday = _weekday_number(next_week_match.group(1))
+        days_until_next_weekday = 7 - base_date.weekday() + weekday
+        return (base_date + timedelta(days=days_until_next_weekday)).isoformat()
+
+    return raw_value
+
+
+def _weekday_number(value: str) -> int:
+    return {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}[value]
+
+
 def _extract_phone_number(raw_text: str) -> str:
     match = re.search(r"(?<!\d)(1[3-9]\d{9})(?!\d)", raw_text)
     return match.group(1) if match else ""
@@ -259,7 +333,7 @@ def _resolve_customer_name(candidate: str, customer_type: str, contact: str, raw
     name = candidate.strip()
     if not name:
         return _fallback_customer_name(customer_type, raw_text)
-    if customer_type in {"网店KA客户", "网店店群客户"} and _looks_like_contact_name(name, contact):
+    if any(_has_customer_type(customer_type, item) for item in ("网店KA客户", "网店店群客户", "博主")) and _looks_like_contact_name(name, contact):
         return _fallback_customer_name(customer_type, raw_text) or name
     return name
 
@@ -278,14 +352,21 @@ def _looks_like_contact_name(name: str, contact: str) -> bool:
 
 
 def _fallback_customer_name(customer_type: str, raw_text: str) -> str:
-    if customer_type == "网店KA客户":
+    if _has_customer_type(customer_type, "博主"):
+        blogger_name = _extract_blogger_name(raw_text)
+        if blogger_name:
+            return blogger_name
+        if "小时达" in raw_text or "微信" in raw_text:
+            return "新博主-小时达-微信"
+        return "新博主-待确认"
+    if _has_customer_type(customer_type, "网店KA客户"):
         store_name = _extract_shop_store_name(raw_text)
         if store_name:
             return store_name
         if "抖店" in raw_text:
             return "新客户-抖店KA"
         return "新客户-网店KA"
-    if customer_type == "网店店群客户":
+    if _has_customer_type(customer_type, "网店店群客户"):
         if "抖店" in raw_text:
             return "新客户-抖店店群"
         if "店群" in raw_text:
@@ -294,6 +375,23 @@ def _fallback_customer_name(customer_type: str, raw_text: str) -> str:
     if "品牌" in raw_text:
         return "新客户-品牌合作"
     return "新客户-待确认"
+
+
+def _has_customer_type(value: str, customer_type: str) -> bool:
+    return customer_type in _split_multi_value(value)
+
+
+def _extract_blogger_name(raw_text: str) -> str:
+    patterns = (
+        r"@([\u4e00-\u9fa5A-Za-z0-9·•._-]{2,30})",
+        r"(?:博主|达人|推广者|账号)[：:\s]*([\u4e00-\u9fa5A-Za-z0-9·•._-]{2,30})",
+        r"([\u4e00-\u9fa5A-Za-z0-9·•._-]{2,30})[（(](?:小时达|微信|小红书|抖音)[）)]",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, raw_text)
+        if match:
+            return match.group(1).strip()
+    return ""
 
 
 def _extract_shop_store_name(raw_text: str) -> str:

@@ -1,4 +1,6 @@
+#include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,8 +9,9 @@
 
 static const char *REPO_DIR = "/Users/gd/Desktop/主业--草莓客户管理系统";
 static const char *SRC_DIR = "/Users/gd/Desktop/主业--草莓客户管理系统/src";
-static const char *PYTHON_BIN = "/Applications/Xcode.app/Contents/Developer/usr/bin/python3";
+static const char *PYTHON_BIN = "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python";
 static const char *LOG_PATH = "/tmp/strawberry-customer-launcher.log";
+static const char *PID_PATH = "/tmp/strawberry-customer-launcher.pid";
 
 static void write_log(const char *fmt, ...) {
     FILE *fp = fopen(LOG_PATH, "a");
@@ -23,15 +26,68 @@ static void write_log(const char *fmt, ...) {
     fclose(fp);
 }
 
-static void activate_python_app(void) {
-    system("osascript -e 'tell application \"Python\" to activate' >/dev/null 2>&1");
+static void write_pid(pid_t pid) {
+    FILE *fp = fopen(PID_PATH, "w");
+    if (!fp) {
+        return;
+    }
+    fprintf(fp, "%d\n", (int)pid);
+    fclose(fp);
 }
 
-static void launch_python_app(void) {
+static pid_t read_pid(void) {
+    FILE *fp = fopen(PID_PATH, "r");
+    if (!fp) {
+        return 0;
+    }
+    int pid = 0;
+    if (fscanf(fp, "%d", &pid) != 1) {
+        fclose(fp);
+        return 0;
+    }
+    fclose(fp);
+    return (pid_t)pid;
+}
+
+static int process_alive(pid_t pid) {
+    if (pid <= 0) {
+        return 0;
+    }
+    if (kill(pid, 0) == 0) {
+        return 1;
+    }
+    return errno == EPERM;
+}
+
+static int activate_customer_window(void) {
+    const char *command =
+        "osascript >/dev/null 2>&1 <<'APPLESCRIPT'\n"
+        "tell application \"System Events\"\n"
+        "    repeat with proc in (every process whose name is \"Python\")\n"
+        "        tell proc\n"
+        "            try\n"
+        "                if exists (first window whose title contains \"草莓客户管理系统\") then\n"
+        "                    set frontmost to true\n"
+        "                    perform action \"AXRaise\" of (first window whose title contains \"草莓客户管理系统\")\n"
+        "                    return\n"
+        "                end if\n"
+        "            end try\n"
+        "        end tell\n"
+        "    end repeat\n"
+        "    error number 4\n"
+        "end tell\n"
+        "APPLESCRIPT";
+    return system(command);
+}
+
+static pid_t launch_python_app(void) {
     pid_t pid = fork();
     write_log("launch_python_app fork pid=%d", (int)pid);
     if (pid != 0) {
-        return;
+        if (pid > 0) {
+            write_pid(pid);
+        }
+        return pid;
     }
 
     if (chdir(REPO_DIR) != 0) {
@@ -57,7 +113,7 @@ static void launch_python_app(void) {
 
     execl(
         PYTHON_BIN,
-        "python3",
+        "Python",
         "-m",
         "strawberry_customer_management.app",
         (char *)NULL
@@ -67,15 +123,18 @@ static void launch_python_app(void) {
 }
 
 int main(void) {
-    int running = system("pgrep -if 'python.*strawberry_customer_management\\.app' >/dev/null 2>&1");
-    write_log("main running_check=%d", running);
-    if (running == 0) {
-        activate_python_app();
-        return 0;
+    pid_t pid = read_pid();
+    if (process_alive(pid)) {
+        int activated = activate_customer_window();
+        write_log("main activate_existing pid=%d code=%d", (int)pid, activated);
+        if (activated == 0) {
+            return 0;
+        }
     }
 
-    launch_python_app();
-    sleep(1);
-    activate_python_app();
+    pid = launch_python_app();
+    sleep(2);
+    int activated = activate_customer_window();
+    write_log("main activate_after_launch pid=%d code=%d", (int)pid, activated);
     return 0;
 }

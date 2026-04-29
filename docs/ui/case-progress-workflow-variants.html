@@ -1,0 +1,1680 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>草莓客户管理系统 · Case 流程页版本对比</title>
+  <style>
+    :root {
+      --page: #e9eef5;
+      --shell: rgba(244, 247, 251, 0.96);
+      --surface: rgba(255, 255, 255, 0.98);
+      --surface-soft: #fbfdff;
+      --line: #dbe4f2;
+      --line-strong: #ced9ea;
+      --text: #22314a;
+      --text-strong: #18243a;
+      --muted: #78859d;
+      --brand: #ff4b6e;
+      --brand-soft: #fff1f5;
+      --blue: #4a7cff;
+      --blue-soft: #eef4ff;
+      --green: #25aa78;
+      --green-soft: #e9f8f2;
+      --amber: #d68a15;
+      --amber-soft: #fff6df;
+      --red: #de5a6d;
+      --red-soft: #fff1f4;
+      --slate-soft: #f1f5fb;
+      --shadow: 0 24px 60px rgba(34, 49, 74, 0.10);
+      --shadow-soft: 0 14px 34px rgba(34, 49, 74, 0.08);
+      --radius-xl: 30px;
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --radius-sm: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", Arial, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(74, 124, 255, 0.16), transparent 26%),
+        radial-gradient(circle at top right, rgba(255, 75, 110, 0.12), transparent 28%),
+        linear-gradient(180deg, #edf2f9 0%, #e6edf6 100%);
+    }
+
+    a,
+    button {
+      font: inherit;
+    }
+
+    .app {
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .window {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      min-height: calc(100vh - 40px);
+      background: var(--shell);
+      border: 1px solid rgba(216, 225, 239, 0.9);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(22px);
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      padding: 22px 18px;
+      background: rgba(248, 250, 252, 0.88);
+      border-right: 1px solid rgba(226, 232, 240, 0.9);
+    }
+
+    .brand {
+      padding: 18px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 245, 247, 0.92));
+      border: 1px solid #f0d9de;
+      border-radius: 22px;
+    }
+
+    .brand-top {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 5px 12px;
+      color: #cf7a3e;
+      background: #fff6ec;
+      border: 1px solid #f3d2b7;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+
+    .brand h1 {
+      margin: 14px 0 6px;
+      color: var(--brand);
+      font-size: 28px;
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .brand p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+      font-weight: 600;
+    }
+
+    .nav {
+      padding: 16px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .nav-title {
+      margin: 0 0 10px;
+      color: var(--text-strong);
+      font-size: 15px;
+      font-weight: 850;
+    }
+
+    .nav-subtitle {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+      font-weight: 600;
+    }
+
+    .jump-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .jump-link {
+      display: grid;
+      grid-template-columns: 40px 1fr;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 12px 12px 10px;
+      color: inherit;
+      text-decoration: none;
+      background: linear-gradient(180deg, #ffffff, #fbfdff);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }
+
+    .jump-link:hover {
+      transform: translateY(-2px);
+      border-color: #cfdaf2;
+      box-shadow: 0 12px 28px rgba(74, 124, 255, 0.10);
+    }
+
+    .jump-index {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      color: #8ea0bf;
+      background: #f5f8fe;
+      border: 1px solid #e1e9f6;
+      border-radius: 14px;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .jump-copy strong {
+      display: block;
+      color: var(--text-strong);
+      font-size: 14px;
+      line-height: 1.25;
+      font-weight: 850;
+    }
+
+    .jump-copy span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+      font-weight: 650;
+    }
+
+    .sidebar-note {
+      margin-top: auto;
+      padding: 16px;
+      color: #a35463;
+      background: linear-gradient(180deg, #fff7f8, #fff0f3);
+      border: 1px solid #f3d8de;
+      border-radius: 22px;
+      font-size: 12px;
+      line-height: 1.75;
+      font-weight: 650;
+    }
+
+    .workspace {
+      min-width: 0;
+      overflow: auto;
+      padding: 18px;
+    }
+
+    .workspace-inner {
+      display: grid;
+      gap: 18px;
+      min-width: 1180px;
+      max-width: 1680px;
+      margin: 0 auto;
+    }
+
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 24px 28px;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.94));
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .hero-eyebrow {
+      color: var(--brand);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      font-weight: 850;
+    }
+
+    .hero h2 {
+      margin: 10px 0 8px;
+      color: var(--text-strong);
+      font-size: 30px;
+      letter-spacing: -0.05em;
+      line-height: 1.08;
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.75;
+      font-weight: 650;
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      min-width: 360px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 16px;
+      color: #fff;
+      text-decoration: none;
+      background: var(--blue);
+      border-radius: 14px;
+      font-size: 14px;
+      font-weight: 850;
+      box-shadow: 0 14px 28px rgba(74, 124, 255, 0.22);
+    }
+
+    .button.secondary {
+      color: #4969c9;
+      background: #eef4ff;
+      box-shadow: none;
+      border: 1px solid #d8e4ff;
+    }
+
+    .button.ghost {
+      color: var(--text);
+      background: #fff;
+      box-shadow: none;
+      border: 1px solid var(--line);
+    }
+
+    .chip-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 34px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .chip.done {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .chip.active {
+      color: #416ce3;
+      background: var(--blue-soft);
+    }
+
+    .chip.todo {
+      color: #66758d;
+      background: var(--slate-soft);
+    }
+
+    .chip.risk {
+      color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .versions {
+      display: grid;
+      gap: 22px;
+    }
+
+    .version {
+      padding: 24px;
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 30px;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .version-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+      margin-bottom: 18px;
+    }
+
+    .version-header h3 {
+      margin: 0;
+      color: var(--text-strong);
+      font-size: 28px;
+      letter-spacing: -0.04em;
+    }
+
+    .version-header p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.75;
+      font-weight: 650;
+      max-width: 720px;
+    }
+
+    .pick-tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 40px;
+      padding: 0 14px;
+      color: #4969c9;
+      background: #eef4ff;
+      border: 1px solid #d8e4ff;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px 18px;
+      border-bottom: 1px solid #e7eef8;
+    }
+
+    .panel-title {
+      margin: 0;
+      color: var(--text-strong);
+      font-size: 18px;
+      font-weight: 850;
+    }
+
+    .panel-subtitle {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+      font-weight: 650;
+    }
+
+    .case-summary {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) 350px;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .summary-card {
+      padding: 22px;
+      background: linear-gradient(135deg, rgba(255, 75, 110, 0.07), transparent 30%), linear-gradient(180deg, #fff, #fbfdff);
+      border: 1px solid var(--line);
+      border-radius: 26px;
+    }
+
+    .summary-code {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 10px;
+      color: var(--brand);
+      background: var(--brand-soft);
+      border: 1px solid #ffd9e1;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .summary-card h4 {
+      margin: 14px 0 10px;
+      color: var(--text-strong);
+      font-size: 26px;
+      line-height: 1.18;
+      letter-spacing: -0.04em;
+    }
+
+    .summary-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.8;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .metric {
+      padding: 13px 14px;
+      background: #fff;
+      border: 1px solid #e2eaf6;
+      border-radius: 18px;
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .metric-value {
+      margin-top: 5px;
+      color: var(--text-strong);
+      font-size: 20px;
+      font-weight: 900;
+      letter-spacing: -0.03em;
+    }
+
+    .role-stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .role-card {
+      padding: 14px;
+      background: linear-gradient(180deg, #ffffff, #fafcff);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+    }
+
+    .role-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+
+    .role-name {
+      color: var(--text-strong);
+      font-size: 15px;
+      font-weight: 850;
+    }
+
+    .role-type {
+      color: #6f7d95;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .role-meta {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+      font-weight: 650;
+    }
+
+    .variant-a {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 18px;
+    }
+
+    .flow-grid {
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+    }
+
+    .flow-track {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(118px, 1fr));
+      gap: 12px;
+      align-items: start;
+      position: relative;
+      padding-top: 18px;
+    }
+
+    .flow-track::before {
+      content: "";
+      position: absolute;
+      left: 44px;
+      right: 44px;
+      top: 39px;
+      height: 4px;
+      background: linear-gradient(90deg, var(--green) 0 39%, var(--blue) 39% 52%, var(--red) 52% 66%, #d8e1ee 66% 100%);
+      border-radius: 999px;
+    }
+
+    .step {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 10px;
+    }
+
+    .step-marker {
+      width: 42px;
+      height: 42px;
+      margin: 0 auto;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      border: 4px solid #fff;
+      border-radius: 999px;
+      box-shadow: 0 10px 18px rgba(34, 49, 74, 0.12);
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .step.done .step-marker {
+      background: var(--green);
+    }
+
+    .step.active .step-marker {
+      background: var(--blue);
+    }
+
+    .step.risk .step-marker {
+      background: var(--red);
+    }
+
+    .step.todo .step-marker {
+      color: #8090a8;
+      background: #e0e7f0;
+    }
+
+    .step-card {
+      min-height: 206px;
+      padding: 14px;
+      background: #fff;
+      border: 1px solid #e2eaf6;
+      border-radius: 18px;
+    }
+
+    .step-card h5 {
+      margin: 0 0 8px;
+      color: var(--text-strong);
+      font-size: 14px;
+      line-height: 1.45;
+      font-weight: 850;
+    }
+
+    .step-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.72;
+      font-weight: 650;
+    }
+
+    .step-next {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed #dbe5f2;
+      color: #43546f;
+      font-size: 12px;
+      line-height: 1.65;
+      font-weight: 720;
+    }
+
+    .risk-text {
+      color: var(--red);
+      font-weight: 850;
+    }
+
+    .side-stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .task-list,
+    .note-list {
+      display: grid;
+      gap: 10px;
+      padding: 16px 18px 18px;
+    }
+
+    .task-item,
+    .note-item {
+      padding: 13px 14px;
+      background: linear-gradient(180deg, #ffffff, #fbfdff);
+      border: 1px solid #e3ebf6;
+      border-radius: 18px;
+    }
+
+    .task-item strong,
+    .note-item strong {
+      display: block;
+      color: var(--text-strong);
+      font-size: 14px;
+      line-height: 1.4;
+      font-weight: 850;
+    }
+
+    .task-item span,
+    .note-item span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+      font-weight: 650;
+    }
+
+    .ai-panel {
+      padding: 18px;
+    }
+
+    .paste-box {
+      width: 100%;
+      min-height: 128px;
+      padding: 14px 15px;
+      color: var(--text);
+      resize: vertical;
+      background: #fbfdff;
+      border: 1px solid #dce6f4;
+      border-radius: 18px;
+      outline: none;
+      line-height: 1.7;
+    }
+
+    .ai-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .candidate-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .candidate {
+      padding: 13px 14px;
+      background: linear-gradient(180deg, #ffffff, #fbfdff);
+      border: 1px solid #e0e9f6;
+      border-radius: 16px;
+    }
+
+    .candidate-label {
+      color: #7a88a0;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .candidate-value {
+      margin-top: 6px;
+      color: var(--text-strong);
+      font-size: 13px;
+      line-height: 1.6;
+      font-weight: 780;
+    }
+
+    .variant-b {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr) 330px;
+      gap: 18px;
+    }
+
+    .timeline-shell {
+      padding: 20px 20px 22px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 14px;
+      position: relative;
+    }
+
+    .timeline::before {
+      content: "";
+      position: absolute;
+      top: 6px;
+      bottom: 6px;
+      left: 23px;
+      width: 4px;
+      background: linear-gradient(180deg, var(--green) 0 37%, var(--blue) 37% 52%, var(--red) 52% 67%, #d9e2ef 67% 100%);
+      border-radius: 999px;
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 48px minmax(0, 1fr);
+      gap: 16px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .timeline-dot {
+      width: 48px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      border: 4px solid #fff;
+      border-radius: 999px;
+      box-shadow: 0 10px 20px rgba(34, 49, 74, 0.12);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .timeline-item.done .timeline-dot {
+      background: var(--green);
+    }
+
+    .timeline-item.active .timeline-dot {
+      background: var(--blue);
+    }
+
+    .timeline-item.risk .timeline-dot {
+      background: var(--red);
+    }
+
+    .timeline-item.todo .timeline-dot {
+      color: #7d8ca4;
+      background: #e0e7f0;
+    }
+
+    .timeline-card {
+      padding: 16px 18px;
+      background: #fff;
+      border: 1px solid #e1eaf6;
+      border-radius: 20px;
+    }
+
+    .timeline-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .timeline-title {
+      color: var(--text-strong);
+      font-size: 16px;
+      line-height: 1.35;
+      font-weight: 850;
+    }
+
+    .timeline-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 14px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+      font-weight: 650;
+    }
+
+    .timeline-next {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed #dce5f2;
+      color: #455671;
+      font-size: 13px;
+      line-height: 1.7;
+      font-weight: 760;
+    }
+
+    .role-column,
+    .reminder-column {
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .variant-c {
+      display: grid;
+      gap: 18px;
+    }
+
+    .board-summary {
+      display: grid;
+      grid-template-columns: 300px repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .board-intro {
+      padding: 18px;
+      background: linear-gradient(180deg, #ffffff, #fbfdff);
+      border: 1px solid #e1e9f6;
+      border-radius: 22px;
+    }
+
+    .board-intro strong {
+      display: block;
+      color: var(--text-strong);
+      font-size: 17px;
+      line-height: 1.35;
+      font-weight: 850;
+    }
+
+    .board-intro span {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+      font-weight: 650;
+    }
+
+    .board-metric {
+      padding: 16px 18px;
+      background: #fff;
+      border: 1px solid #e0e8f5;
+      border-radius: 22px;
+    }
+
+    .board-metric b {
+      display: block;
+      color: var(--text-strong);
+      font-size: 30px;
+      line-height: 1;
+      letter-spacing: -0.04em;
+      margin-bottom: 8px;
+    }
+
+    .board-metric span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+      font-weight: 650;
+    }
+
+    .board-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 330px;
+      gap: 18px;
+    }
+
+    .board-list {
+      display: grid;
+      gap: 14px;
+    }
+
+    .board-card {
+      padding: 18px;
+      background: #fff;
+      border: 1px solid #e1eaf6;
+      border-radius: 24px;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .board-card-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .board-card-title {
+      color: var(--text-strong);
+      font-size: 20px;
+      line-height: 1.2;
+      font-weight: 860;
+      letter-spacing: -0.03em;
+    }
+
+    .board-card-meta {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+      font-weight: 650;
+    }
+
+    .mini-track {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+      gap: 6px;
+      margin: 16px 0 14px;
+    }
+
+    .mini-step {
+      height: 10px;
+      background: #e0e8f2;
+      border-radius: 999px;
+    }
+
+    .mini-step.done {
+      background: var(--green);
+    }
+
+    .mini-step.active {
+      background: var(--blue);
+    }
+
+    .mini-step.risk {
+      background: var(--red);
+    }
+
+    .board-detail-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1fr;
+      gap: 12px;
+    }
+
+    .mini-panel {
+      padding: 14px;
+      background: linear-gradient(180deg, #fdfefe, #f7fbff);
+      border: 1px solid #e4ebf7;
+      border-radius: 18px;
+    }
+
+    .mini-panel strong {
+      display: block;
+      color: var(--text-strong);
+      font-size: 13px;
+      line-height: 1.45;
+      font-weight: 840;
+    }
+
+    .mini-panel span {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+      font-weight: 650;
+    }
+
+    .choice-banner {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      padding: 18px 20px;
+      background: linear-gradient(180deg, #fff9eb, #fffdf5);
+      border: 1px solid #f1ddb1;
+      border-radius: 24px;
+    }
+
+    .choice-banner strong {
+      color: #8f6410;
+      font-size: 15px;
+      font-weight: 850;
+    }
+
+    .choice-banner span {
+      display: block;
+      margin-top: 4px;
+      color: #9d7b2a;
+      font-size: 12px;
+      line-height: 1.7;
+      font-weight: 650;
+    }
+
+    @media (max-width: 1480px) {
+      .case-summary,
+      .variant-a,
+      .variant-b,
+      .board-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .board-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 1320px) {
+      .workspace-inner {
+        min-width: 1040px;
+      }
+
+      .flow-track {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .flow-track::before {
+        display: none;
+      }
+
+      .step-card {
+        min-height: 0;
+      }
+
+      .board-detail-grid,
+      .metric-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="window">
+      <aside class="sidebar">
+        <section class="brand">
+          <div class="brand-top">STRAWBERRY WORKBENCH</div>
+          <h1>草莓</h1>
+          <p>客户、项目、角色和流程收进同一工作台里。这里先只看 Case 流程页的版式差异。</p>
+        </section>
+
+        <section class="nav">
+          <h2 class="nav-title">版本导航</h2>
+          <p class="nav-subtitle">这次不是微调边距，而是给你三种不同阅读节奏，直接挑最顺手的。</p>
+          <div class="jump-list">
+            <a class="jump-link" href="#version-a">
+              <div class="jump-index">A</div>
+              <div class="jump-copy">
+                <strong>舒展内嵌版</strong>
+                <span>详情页里把流程摊开，呼吸感最强。</span>
+              </div>
+            </a>
+            <a class="jump-link" href="#version-b">
+              <div class="jump-index">B</div>
+              <div class="jump-copy">
+                <strong>中轴流程版</strong>
+                <span>流程居中，角色和提醒两侧包住。</span>
+              </div>
+            </a>
+            <a class="jump-link" href="#version-c">
+              <div class="jump-index">C</div>
+              <div class="jump-copy">
+                <strong>运营看板版</strong>
+                <span>按 Case 卡片管理，适合后面多个项目并行。</span>
+              </div>
+            </a>
+          </div>
+        </section>
+
+        <section class="sidebar-note">
+          当前样例固定使用：爱慕儿童 `2026-04` 春夏短视频拍摄项目。<br>
+          参与角色：李岩、熊伟、小苏、临光、草莓 / tiger。<br>
+          你看完直接回我 `A / B / C` 就行。
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <div class="workspace-inner">
+          <section class="hero">
+            <div>
+              <div class="hero-eyebrow">CASE PROGRESS WORKSHOP</div>
+              <h2>把“文字沉淀”升级成可看进度、负责人、卡点和下一步的 Case 工作面。</h2>
+              <p>同一个项目里，不止有品牌方，还会出现供应商、垫资商、实施商、法务和内部 Owner。现在先把这些角色和流程摊开，看哪种页面最适合你每天推进。</p>
+              <div class="chip-row">
+                <span class="chip done">已完成 3</span>
+                <span class="chip active">进行中 1</span>
+                <span class="chip risk">卡住 1</span>
+                <span class="chip todo">待开始 3</span>
+              </div>
+            </div>
+
+            <div class="hero-actions">
+              <a class="button secondary" href="#version-a">先看 A</a>
+              <a class="button secondary" href="#version-b">再看 B</a>
+              <a class="button" href="#version-c">最后看 C</a>
+              <a class="button ghost" href="/Users/gd/Desktop/主业--草莓客户管理系统/docs/ui/case-progress-workflow-mockup.html">回旧版</a>
+            </div>
+          </section>
+
+          <section class="choice-banner">
+            <div>
+              <strong>怎么选会比较快</strong>
+              <span>`A` 适合你主要在单项目里推进。`B` 适合你想把流程本身当主视图。`C` 适合你以后会同时盯多个 Case。</span>
+            </div>
+            <a class="button" href="#version-c">先看最运营向</a>
+          </section>
+
+          <div class="versions">
+            <section class="version" id="version-a">
+              <div class="version-header">
+                <div>
+                  <h3>A · 舒展内嵌版</h3>
+                  <p>保留“项目详情页”这个入口，但把流程拉开，不再挤成一坨。你进来先看到 Case 摘要和角色，再往下是完整节点轨道，右边放今天最该处理的几件事。</p>
+                </div>
+                <div class="pick-tag">更像你现在系统的自然延长版</div>
+              </div>
+
+              <div class="case-summary">
+                <section class="summary-card">
+                  <div class="summary-code">CASE-AIMU-2026-04</div>
+                  <h4>爱慕儿童春夏短视频拍摄，合同已寄出，当前卡在产品到达人确认。</h4>
+                  <p>这个版本把呼吸感拉大，适合边看资料边推进。合同、法务、寄件、达人、垫资、交付这些节点都摊在一条长流程里，负责人和卡点不用再回文字里找。</p>
+                  <div class="metric-grid">
+                    <div class="metric">
+                      <div class="metric-label">整体进度</div>
+                      <div class="metric-value">43%</div>
+                    </div>
+                    <div class="metric">
+                      <div class="metric-label">当前阶段</div>
+                      <div class="metric-value">样品确认</div>
+                    </div>
+                    <div class="metric">
+                      <div class="metric-label">计划交付</div>
+                      <div class="metric-value">05-09</div>
+                    </div>
+                    <div class="metric">
+                      <div class="metric-label">风险点</div>
+                      <div class="metric-value">1</div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="role-stack">
+                  <article class="role-card">
+                    <div class="role-top">
+                      <div class="role-name">李岩</div>
+                      <div class="role-type">品牌方 / 甲方</div>
+                    </div>
+                    <div class="role-meta">负责合同回寄、甲方确认和拍摄方向对齐。</div>
+                  </article>
+                  <article class="role-card">
+                    <div class="role-top">
+                      <div class="role-name">熊伟</div>
+                      <div class="role-type">供应商 / 垫资商</div>
+                    </div>
+                    <div class="role-meta">预计 05-10 给到小苏，对接垫资与承包商衔接。</div>
+                  </article>
+                  <article class="role-card">
+                    <div class="role-top">
+                      <div class="role-name">小苏</div>
+                      <div class="role-type">实施商</div>
+                    </div>
+                    <div class="role-meta">负责脚本、达人收货确认、拍摄准备与交付执行。</div>
+                  </article>
+                  <article class="role-card">
+                    <div class="role-top">
+                      <div class="role-name">临光 / 草莓 / tiger</div>
+                      <div class="role-type">法务审核 / 内部 Owner</div>
+                    </div>
+                    <div class="role-meta">法务已审，内部继续盯节点推进与回款收档。</div>
+                  </article>
+                </section>
+              </div>
+
+              <div class="variant-a">
+                <section class="panel">
+                  <div class="panel-header">
+                    <div>
+                      <h4 class="panel-title">流程节点</h4>
+                      <div class="panel-subtitle">横向摊开所有主要节点，适合先看一眼进度再点具体节点。</div>
+                    </div>
+                  </div>
+                  <div class="flow-grid">
+                    <div class="flow-track">
+                      <article class="step done">
+                        <div class="step-marker">1</div>
+                        <div class="step-card">
+                          <h5>合同 / 确认单</h5>
+                          <p>负责人：草莓<br>计划：04-16<br>完成：04-17</p>
+                          <div class="step-next">下一步：归档确认单与报价附件。</div>
+                        </div>
+                      </article>
+                      <article class="step done">
+                        <div class="step-marker">2</div>
+                        <div class="step-card">
+                          <h5>审批 / 法务</h5>
+                          <p>负责人：临光<br>计划：04-18<br>完成：04-19</p>
+                          <div class="step-next">下一步：保留法务审核记录。</div>
+                        </div>
+                      </article>
+                      <article class="step done">
+                        <div class="step-marker">3</div>
+                        <div class="step-card">
+                          <h5>寄件 / 盖章</h5>
+                          <p>负责人：李岩<br>计划：04-20<br>完成：04-22</p>
+                          <div class="step-next">下一步：确认合同原件收档。</div>
+                        </div>
+                      </article>
+                      <article class="step active">
+                        <div class="step-marker">4</div>
+                        <div class="step-card">
+                          <h5>达人脚本</h5>
+                          <p>负责人：小苏<br>计划：04-24<br>状态：进行中</p>
+                          <div class="step-next">下一步：李岩确认脚本口播点。</div>
+                        </div>
+                      </article>
+                      <article class="step risk">
+                        <div class="step-marker">5</div>
+                        <div class="step-card">
+                          <h5>产品到达人 / 拍摄准备</h5>
+                          <p>负责人：小苏<br>计划：04-28<br>状态：未完成</p>
+                          <div class="step-next"><span class="risk-text">卡点：达人样品收货回执未齐。</span></div>
+                        </div>
+                      </article>
+                      <article class="step todo">
+                        <div class="step-marker">6</div>
+                        <div class="step-card">
+                          <h5>供应商垫资 / 实施</h5>
+                          <p>负责人：熊伟<br>计划：04-30</p>
+                          <div class="step-next">下一步：确认垫资金额与给到小苏的衔接。</div>
+                        </div>
+                      </article>
+                      <article class="step todo">
+                        <div class="step-marker">7</div>
+                        <div class="step-card">
+                          <h5>拍摄交付</h5>
+                          <p>负责人：小苏<br>计划：05-09</p>
+                          <div class="step-next">下一步：提交初剪与验收链接。</div>
+                        </div>
+                      </article>
+                      <article class="step todo">
+                        <div class="step-marker">8</div>
+                        <div class="step-card">
+                          <h5>回款 / 收档</h5>
+                          <p>负责人：tiger<br>计划：05-15</p>
+                          <div class="step-next">下一步：触发回款提醒和资料归档。</div>
+                        </div>
+                      </article>
+                    </div>
+                  </div>
+                </section>
+
+                <aside class="side-stack">
+                  <section class="panel">
+                    <div class="panel-header">
+                      <div>
+                        <h4 class="panel-title">今天先处理</h4>
+                        <div class="panel-subtitle">右侧只留最该动的几步，不塞满说明。</div>
+                      </div>
+                    </div>
+                    <div class="task-list">
+                      <div class="task-item">
+                        <strong>确认达人收货时间</strong>
+                        <span>负责人：小苏 · 今天。样品收货回执缺失，直接影响拍摄排期。</span>
+                      </div>
+                      <div class="task-item">
+                        <strong>同步熊伟垫资金额</strong>
+                        <span>负责人：草莓 · 04-30。要先把金额和凭证口径对齐。</span>
+                      </div>
+                      <div class="task-item">
+                        <strong>准备拍摄验收口径</strong>
+                        <span>负责人：tiger · 05-03。避免后面交付时重新对齐标准。</span>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="panel ai-panel">
+                    <div class="panel-header">
+                      <div>
+                        <h4 class="panel-title">手动 + AI 整理</h4>
+                        <div class="panel-subtitle">你贴一段新进展，它先整理成候选节点和负责人。</div>
+                      </div>
+                    </div>
+                    <textarea class="paste-box">小苏说 4/29 晚上能补齐达人收货截图，熊伟等确认金额后安排垫资。</textarea>
+                    <div class="ai-toolbar">
+                      <a class="button secondary" href="#version-a">生成候选</a>
+                      <span class="chip active">待确认后写入</span>
+                    </div>
+                    <div class="candidate-grid">
+                      <div class="candidate">
+                        <div class="candidate-label">候选节点</div>
+                        <div class="candidate-value">产品到达人 / 拍摄准备</div>
+                      </div>
+                      <div class="candidate">
+                        <div class="candidate-label">候选负责人</div>
+                        <div class="candidate-value">小苏</div>
+                      </div>
+                      <div class="candidate">
+                        <div class="candidate-label">候选下一步</div>
+                        <div class="candidate-value">04-29 晚补齐收货截图</div>
+                      </div>
+                      <div class="candidate">
+                        <div class="candidate-label">候选卡点</div>
+                        <div class="candidate-value">等待熊伟确认垫资金额</div>
+                      </div>
+                    </div>
+                  </section>
+                </aside>
+              </div>
+            </section>
+
+            <section class="version" id="version-b">
+              <div class="version-header">
+                <div>
+                  <h3>B · 中轴流程版</h3>
+                  <p>这个版本把流程本身抬到页面中心，角色在左、提醒在右。你眼睛一落下去先看“现在走到哪一步”，更像一个真正的执行流程面，而不是项目详情页里的一个模块。</p>
+                </div>
+                <div class="pick-tag">更强调流程本身，而不是资料详情</div>
+              </div>
+
+              <div class="variant-b">
+                <aside class="role-column">
+                  <section class="panel">
+                    <div class="panel-header">
+                      <div>
+                        <h4 class="panel-title">参与角色</h4>
+                        <div class="panel-subtitle">左边是人和职责，查人很快。</div>
+                      </div>
+                    </div>
+                    <div class="task-list">
+                      <div class="note-item">
+                        <strong>李岩 · 品牌方 / 甲方</strong>
+                        <span>负责合同回寄、甲方方向确认、拍摄对齐。</span>
+                      </div>
+                      <div class="note-item">
+                        <strong>熊伟 · 供应商 / 垫资商</strong>
+                        <span>预计 05-10 给到小苏，衔接垫资和承包商执行。</span>
+                      </div>
+                      <div class="note-item">
+                        <strong>小苏 · 实施商</strong>
+                        <span>负责脚本、达人收货、拍摄准备与交付执行。</span>
+                      </div>
+                      <div class="note-item">
+                        <strong>临光 · 法务审核</strong>
+                        <span>法务审核已完成，当前只需保留留痕。</span>
+                      </div>
+                      <div class="note-item">
+                        <strong>草莓 / tiger · 内部 Owner</strong>
+                        <span>盯推进节奏、验收口径、回款与收档。</span>
+                      </div>
+                    </div>
+                  </section>
+                </aside>
+
+                <section class="panel timeline-shell">
+                  <div class="panel-header">
+                    <div>
+                      <h4 class="panel-title">流程主轴</h4>
+                      <div class="panel-subtitle">适合持续往里加新信息，每条更新都能落到一个节点上。</div>
+                    </div>
+                    <span class="chip active">当前阶段：产品到达人 / 拍摄准备</span>
+                  </div>
+                  <div class="timeline">
+                    <article class="timeline-item done">
+                      <div class="timeline-dot">1</div>
+                      <div class="timeline-card">
+                        <div class="timeline-top">
+                          <div class="timeline-title">合同 / 确认单</div>
+                          <span class="chip done">已完成</span>
+                        </div>
+                        <div class="timeline-grid">
+                          <span>负责人：草莓</span>
+                          <span>计划：04-16</span>
+                          <span>完成：04-17</span>
+                          <span>留痕：确认单已归档</span>
+                        </div>
+                        <div class="timeline-next">下一步：报价附件和确认单归档留底。</div>
+                      </div>
+                    </article>
+
+                    <article class="timeline-item done">
+                      <div class="timeline-dot">2</div>
+                      <div class="timeline-card">
+                        <div class="timeline-top">
+                          <div class="timeline-title">审批 / 法务</div>
+                          <span class="chip done">已完成</span>
+                        </div>
+                        <div class="timeline-grid">
+                          <span>负责人：临光</span>
+                          <span>计划：04-18</span>
+                          <span>完成：04-19</span>
+                          <span>当前状态：法务已审</span>
+                        </div>
+                        <div class="timeline-next">下一步：审核结论保留在审批记录里。</div>
+                      </div>
+                    </article>
+
+                    <article class="timeline-item active">
+                      <div class="timeline-dot">3</div>
+                      <div class="timeline-card">
+                        <div class="timeline-top">
+                          <div class="timeline-title">达人脚本</div>
+                          <span class="chip active">进行中</span>
+                        </div>
+                        <div class="timeline-grid">
+                          <span>负责人：小苏</span>
+                          <span>计划：04-24</span>
+                          <span>配合人：李岩</span>
+                          <span>当前状态：脚本方向已过</span>
+                        </div>
+                        <div class="timeline-next">下一步：李岩确认口播重点，脚本即可收口。</div>
+                      </div>
+                    </article>
+
+                    <article class="timeline-item risk">
+                      <div class="timeline-dot">4</div>
+                      <div class="timeline-card">
+                        <div class="timeline-top">
+                          <div class="timeline-title">产品到达人 / 拍摄准备</div>
+                          <span class="chip risk">卡住</span>
+                        </div>
+                        <div class="timeline-grid">
+                          <span>负责人：小苏</span>
+                          <span>计划：04-28</span>
+                          <span>卡点：回执未齐</span>
+                          <span>风险：影响拍摄排期</span>
+                        </div>
+                        <div class="timeline-next"><span class="risk-text">先催达人收货截图，再决定拍摄档期。</span></div>
+                      </div>
+                    </article>
+
+                    <article class="timeline-item todo">
+                      <div class="timeline-dot">5</div>
+                      <div class="timeline-card">
+                        <div class="timeline-top">
+                          <div class="timeline-title">供应商垫资 / 实施</div>
+                          <span class="chip todo">待开始</span>
+                        </div>
+                        <div class="timeline-grid">
+                          <span>负责人：熊伟</span>
+                          <span>计划：04-30</span>
+                          <span>衔接人：小苏</span>
+                          <span>节点：05-10 给到</span>
+                        </div>
+                        <div class="timeline-next">下一步：确认垫资金额、凭证口径和小苏接手时间。</div>
+                      </div>
+                    </article>
+                  </div>
+                </section>
+
+                <aside class="reminder-column">
+                  <section class="panel">
+                    <div class="panel-header">
+                      <div>
+                        <h4 class="panel-title">本周提醒</h4>
+                        <div class="panel-subtitle">右边只保留推进视角，不塞大段说明。</div>
+                      </div>
+                    </div>
+                    <div class="task-list">
+                      <div class="task-item">
+                        <strong>今天先催达人回执</strong>
+                        <span>负责人：小苏。没回执，拍摄排期不动。</span>
+                      </div>
+                      <div class="task-item">
+                        <strong>明天对齐垫资金额</strong>
+                        <span>负责人：草莓 / 熊伟。金额不清，会拖慢实施衔接。</span>
+                      </div>
+                      <div class="task-item">
+                        <strong>05-03 前补验收口径</strong>
+                        <span>负责人：tiger。防止后面交付时重新返工。</span>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="panel ai-panel">
+                    <div class="panel-header">
+                      <div>
+                        <h4 class="panel-title">新信息入口</h4>
+                        <div class="panel-subtitle">更像流程台账，不是只给你看一眼。</div>
+                      </div>
+                    </div>
+                    <textarea class="paste-box">临光说法务这边已经 OK，小苏那边就等达人收货截图，熊伟这周先核金额。</textarea>
+                    <div class="candidate-grid">
+                      <div class="candidate">
+                        <div class="candidate-label">识别到角色</div>
+                        <div class="candidate-value">临光 / 小苏 / 熊伟</div>
+                      </div>
+                      <div class="candidate">
+                        <div class="candidate-label">识别到节点</div>
+                        <div class="candidate-value">审批 / 产品到达人 / 垫资实施</div>
+                      </div>
+                    </div>
+                  </section>
+                </aside>
+              </div>
+            </section>
+
+            <section class="version" id="version-c">
+              <div class="version-header">
+                <div>
+                  <h3>C · 运营看板版</h3>
+                  <p>这个版本不把重心放在“一个长流程”上，而是把整个 Case 当成运营卡片来管理。适合你后面同时盯很多品牌项目、KA 跟进和博主合作，读起来最轻，但也最像正式产品页。</p>
+                </div>
+                <div class="pick-tag">如果后面要扩成正式系统，我更推荐这版</div>
+              </div>
+
+              <div class="board-summary">
+                <div class="board-intro">
+                  <strong>爱慕儿童 · 春夏短视频拍摄</strong>
+                  <span>把一个 Case 的角色、流程、下一步和卡点压成可扫卡片。不会像时间线那样一路拉很长，但适合未来并排看多个 Case。</span>
+                </div>
+                <div class="board-metric">
+                  <b>43%</b>
+                  <span>整体进度已到样品确认和拍摄准备阶段。</span>
+                </div>
+                <div class="board-metric">
+                  <b>5</b>
+                  <span>当前有效角色，品牌方、垫资、实施、法务和内部 Owner 都清晰可见。</span>
+                </div>
+                <div class="board-metric">
+                  <b>1</b>
+                  <span>当前卡点只有一个，达人收货回执未齐。</span>
+                </div>
+                <div class="board-metric">
+                  <b>3</b>
+                  <span>待开始节点还剩 3 个，垫资、交付和收档。</span>
+                </div>
+              </div>
+
+              <div class="board-layout">
+                <div class="board-list">
+                  <article class="board-card">
+                    <div class="board-card-top">
+                      <div>
+                        <div class="board-card-title">爱慕儿童 2026-04 春夏短视频拍摄项目</div>
+                        <div class="board-card-meta">品牌方 / 甲方：李岩 · 实施商：小苏 · 供应商 / 垫资商：熊伟 · 法务：临光</div>
+                      </div>
+                      <span class="chip active">当前推进中</span>
+                    </div>
+
+                    <div class="mini-track">
+                      <span class="mini-step done"></span>
+                      <span class="mini-step done"></span>
+                      <span class="mini-step done"></span>
+                      <span class="mini-step active"></span>
+                      <span class="mini-step risk"></span>
+                      <span class="mini-step"></span>
+                      <span class="mini-step"></span>
+                      <span class="mini-step"></span>
+                    </div>
+
+                    <div class="board-detail-grid">
+                      <section class="mini-panel">
+                        <strong>现在走到哪</strong>
+                        <span>达人脚本方向已过，产品已到达人处，正在确认收货回执和拍摄准备。</span>
+                      </section>
+                      <section class="mini-panel">
+                        <strong>谁在负责</strong>
+                        <span>小苏主盯样品与拍摄，李岩对口确认，草莓 / tiger 盯下一步和验收。</span>
+                      </section>
+                      <section class="mini-panel">
+                        <strong>下一步</strong>
+                        <span>今天先拿回执，明天对齐垫资金额，05-03 前补好交付验收口径。</span>
+                      </section>
+                    </div>
+                  </article>
+
+                  <article class="board-card">
+                    <div class="board-card-top">
+                      <div>
+                        <div class="board-card-title">角色和流程可持续追加</div>
+                        <div class="board-card-meta">不是一次性展示，而是未来每次补新信息都能落点。</div>
+                      </div>
+                      <span class="chip todo">待确认后写入</span>
+                    </div>
+                    <div class="board-detail-grid">
+                      <section class="mini-panel">
+                        <strong>你贴一段新进展</strong>
+                        <span>例如“小苏说今晚补收货截图，熊伟核完金额再垫资”。</span>
+                      </section>
+                      <section class="mini-panel">
+                        <strong>系统先整理候选</strong>
+                        <span>识别出节点、角色、计划日期和卡点，不直接乱写进正式数据。</span>
+                      </section>
+                      <section class="mini-panel">
+                        <strong>你确认后再落库</strong>
+                        <span>角色进 `参与角色`，节点进 `项目进度`，后面客户跟进和自动化都能复用。</span>
+                      </section>
+                    </div>
+                  </article>
+                </div>
+
+                <aside class="role-column">
+                  <section class="panel">
+                    <div class="panel-header">
+                      <div>
+                        <h4 class="panel-title">今天最该盯</h4>
+                        <div class="panel-subtitle">更像你每天打开系统先扫一眼的区域。</div>
+                      </div>
+                    </div>
+                    <div class="task-list">
+                      <div class="task-item">
+                        <strong>达人回执</strong>
+                        <span>负责人：小苏。今天必须拿到，不然拍摄档期虚着。</span>
+                      </div>
+                      <div class="task-item">
+                        <strong>垫资金额</strong>
+                        <span>负责人：熊伟 / 草莓。先把金额和凭证边界说清。</span>
+                      </div>
+                      <div class="task-item">
+                        <strong>验收口径</strong>
+                        <span>负责人：tiger。交付前先把收口标准补齐。</span>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="panel">
+                    <div class="panel-header">
+                      <div>
+                        <h4 class="panel-title">为什么这版更松</h4>
+                        <div class="panel-subtitle">它不再把全部信息挤进一条流程上。</div>
+                      </div>
+                    </div>
+                    <div class="note-list">
+                      <div class="note-item">
+                        <strong>卡片先讲结果</strong>
+                        <span>先看“现在走到哪”，再决定要不要下钻看节点细节。</span>
+                      </div>
+                      <div class="note-item">
+                        <strong>角色和任务拆开</strong>
+                        <span>谁负责、下一步是什么、当前卡点是什么，不堆在同一块里打架。</span>
+                      </div>
+                      <div class="note-item">
+                        <strong>适合正式接入</strong>
+                        <span>后面不止爱慕一个 Case 时，这种版式最容易扩成产品首页。</span>
+                      </div>
+                    </div>
+                  </section>
+                </aside>
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

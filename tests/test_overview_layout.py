@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 import os
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel, QSizePolicy
+from PySide6.QtWidgets import QApplication, QComboBox, QFrame, QPushButton, QLabel, QSizePolicy
 
 from strawberry_customer_management.models import CustomerRecord, ProjectRecord
 from strawberry_customer_management.ui.pages.overview_page import OverviewPage, _sort_customer_records
@@ -108,3 +110,171 @@ def test_overview_related_projects_follow_latest_update_first() -> None:
     assert _side_item_title(0) == "最新项目"
     assert _side_item_title(1) == "同日后录入项目"
     assert _side_item_title(2) == "旧项目"
+
+
+def test_overview_timeline_card_uses_compact_actions() -> None:
+    _app()
+    page = OverviewPage()
+    today = date.today().isoformat()
+    page.set_customers(
+        [
+            CustomerRecord(
+                name="爱慕",
+                customer_type="品牌客户",
+                stage="已合作",
+                business_direction="视频拍摄",
+                current_need="确认夏季拍摄安排",
+                next_action="今天补齐拍摄时间和寄样计划",
+                next_follow_up_date=today,
+                updated_at="2026-04-26",
+            )
+        ]
+    )
+
+    timeline_cards = [widget for widget in page.findChildren(QFrame) if widget.objectName() == "TimelineCardSelected"]
+
+    assert timeline_cards
+    due_chip = [button for button in timeline_cards[0].findChildren(QPushButton) if button.objectName() == "TimelineDueChipButton"][0]
+    assert due_chip.text() == "今天"
+    assert [button.text() for button in timeline_cards[0].findChildren(QPushButton)] == ["今天", "›"]
+    assert len(timeline_cards[0].findChildren(QComboBox)) == 1
+
+
+def test_overview_timeline_due_chip_uses_relative_text_for_tomorrow() -> None:
+    _app()
+    page = OverviewPage()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    page.set_customers(
+        [
+            CustomerRecord(
+                name="孙总",
+                customer_type="博主 / 网店店群客户",
+                stage="沟通中",
+                business_direction="AI商品图 / AI详情页推广",
+                current_need="确认推广合作",
+                next_action="明天回来确认推广坑位、报价和排期",
+                next_follow_up_date=tomorrow,
+                updated_at="2026-04-27",
+            )
+        ]
+    )
+
+    timeline_cards = [widget for widget in page.findChildren(QFrame) if widget.objectName() == "TimelineCardSelected"]
+
+    assert timeline_cards
+    due_chip = [button for button in timeline_cards[0].findChildren(QPushButton) if button.objectName() == "TimelineDueChipButton"][0]
+    assert due_chip.text() == "明天"
+
+
+def test_overview_due_chip_click_emits_customer_reschedule_action() -> None:
+    _app()
+    page = OverviewPage()
+    captured: list[tuple[str, str]] = []
+    page.customer_follow_up_action_requested.connect(lambda name, action: captured.append((name, action)))
+    page.set_customers(
+        [
+            CustomerRecord(
+                name="孤帆远影",
+                customer_type="网店店群客户",
+                stage="沟通中",
+                next_action="下午主动联系",
+                next_follow_up_date="2026-04-28",
+                updated_at="2026-04-28",
+            )
+        ]
+    )
+
+    timeline_card = [widget for widget in page.findChildren(QFrame) if widget.objectName() == "TimelineCardSelected"][0]
+    due_chip = [button for button in timeline_card.findChildren(QPushButton) if button.objectName() == "TimelineDueChipButton"][0]
+    with patch("strawberry_customer_management.ui.pages.overview_page.QInputDialog.getText", return_value=("2026-05-03", True)):
+        due_chip.click()
+
+    assert captured == [("孤帆远影", "reschedule:2026-05-03")]
+
+
+def test_overview_timeline_action_combo_can_open_reschedule_prompt_for_project() -> None:
+    _app()
+    page = OverviewPage()
+    captured: list[tuple[str, str, str]] = []
+    page.project_follow_up_action_requested.connect(
+        lambda customer_name, project_name, action: captured.append((customer_name, project_name, action))
+    )
+    page.set_follow_up_projects(
+        [
+            ProjectRecord(
+                brand_customer_name="孙总",
+                project_name="2026-04 孙总AI商品图推广合作跟进",
+                stage="推进中",
+                year="2026",
+                project_type="博主推广",
+                next_action="明天确认推广报价",
+                next_follow_up_date="2026-04-28",
+                updated_at="2026-04-27",
+            )
+        ]
+    )
+
+    timeline_card = [widget for widget in page.findChildren(QFrame) if widget.objectName() == "TimelineCard"][0]
+    action_combo = timeline_card.findChildren(QComboBox)[0]
+    with patch("strawberry_customer_management.ui.pages.overview_page.QInputDialog.getText", return_value=("", True)):
+        action_combo.activated.emit(2)
+
+    assert captured == [("孙总", "2026-04 孙总AI商品图推广合作跟进", "unschedule")]
+    assert action_combo.currentIndex() == 0
+
+
+def test_overview_timeline_action_combo_keeps_customer_follow_up_actions() -> None:
+    _app()
+    page = OverviewPage()
+    captured: list[tuple[str, str]] = []
+    page.customer_follow_up_action_requested.connect(lambda name, action: captured.append((name, action)))
+    page.set_customers(
+        [
+            CustomerRecord(
+                name="爱慕",
+                customer_type="品牌客户",
+                stage="已合作",
+                business_direction="视频拍摄",
+                next_action="今天确认拍摄时间",
+                next_follow_up_date="2026-04-27",
+                updated_at="2026-04-26",
+            )
+        ]
+    )
+
+    timeline_card = [widget for widget in page.findChildren(QFrame) if widget.objectName() == "TimelineCardSelected"][0]
+    action_combo = timeline_card.findChildren(QComboBox)[0]
+    action_combo.activated.emit(1)
+
+    assert captured == [("爱慕", "complete")]
+    assert action_combo.currentIndex() == 0
+
+
+def test_overview_timeline_action_combo_keeps_project_follow_up_actions() -> None:
+    _app()
+    page = OverviewPage()
+    captured: list[tuple[str, str, str]] = []
+    page.project_follow_up_action_requested.connect(
+        lambda customer_name, project_name, action: captured.append((customer_name, project_name, action))
+    )
+    page.set_follow_up_projects(
+        [
+            ProjectRecord(
+                brand_customer_name="孙总",
+                project_name="2026-04 孙总AI商品图推广合作跟进",
+                stage="推进中",
+                year="2026",
+                project_type="博主推广",
+                next_action="明天确认推广报价",
+                next_follow_up_date="2026-04-28",
+                updated_at="2026-04-27",
+            )
+        ]
+    )
+
+    timeline_card = [widget for widget in page.findChildren(QFrame) if widget.objectName() == "TimelineCard"][0]
+    action_combo = timeline_card.findChildren(QComboBox)[0]
+    action_combo.activated.emit(3)
+
+    assert captured == [("孙总", "2026-04 孙总AI商品图推广合作跟进", "tomorrow")]
+    assert action_combo.currentIndex() == 0

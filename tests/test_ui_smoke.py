@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import os
 import time
 
@@ -12,6 +12,7 @@ from strawberry_customer_management.models import CustomerDetail
 from strawberry_customer_management.models import CustomerRecord
 from strawberry_customer_management.project_store import MarkdownProjectStore
 from strawberry_customer_management.ui.pages.overview_page import OverviewPage
+from strawberry_customer_management.ui.pages.customer_library_page import CustomerLibraryPage
 from strawberry_customer_management.ui.pages.project_management_page import ProjectManagementPage
 from strawberry_customer_management.ui.pages.quick_capture_page import QuickCapturePage
 from strawberry_customer_management.ui.pages.settings_page import SettingsPage
@@ -41,7 +42,58 @@ def test_main_window_instantiates_with_empty_customer_root(tmp_path):
     window = MainWindow(config_store=config_store)
 
     assert window.windowTitle() == "草莓客户管理系统"
-    assert window.nav.count() == 4
+    assert window.nav.count() == 5
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_overview_uses_all_active_follow_up_customers(tmp_path):
+    customer_root = tmp_path / "客户管理"
+    customer_root.mkdir()
+    store = MarkdownCustomerStore(customer_root)
+    for draft in (
+        CustomerDraft(
+            name="MW1",
+            customer_type="品牌客户",
+            stage="已归档",
+            business_direction="短视频拍摄",
+            current_need="去年项目已结束",
+            next_action="仅保留历史查询",
+            next_follow_up_date="已归档",
+            communication=CommunicationEntry(entry_date="2026-04-27", summary="确认收档"),
+        ),
+        CustomerDraft(
+            name="blackhead",
+            customer_type="品牌客户",
+            stage="已合作",
+            business_direction="小红书营销",
+            current_need="补齐当前需求",
+            next_action="补齐联系人",
+            communication=CommunicationEntry(entry_date="2026-04-20", summary="旧客户"),
+        ),
+        CustomerDraft(
+            name="孙总",
+            customer_type="博主 / 网店店群客户",
+            stage="沟通中",
+            secondary_tags="小时达 / 微信",
+            business_direction="AI商品图 / AI详情页推广",
+            current_need="确认推广合作",
+            next_action="明天回来确认推广坑位、报价和排期",
+            next_follow_up_date="2026-04-28",
+            communication=CommunicationEntry(entry_date="2026-04-27", summary="明天回来确认"),
+        ),
+    ):
+        store.upsert_customer(draft)
+    config_path = tmp_path / "config.json"
+    config_store = ConfigStore(config_path)
+    config_store.save({"customer_root": str(customer_root), "main_work_root": str(tmp_path / "主业")})
+
+    app = build_app()
+    window = MainWindow(config_store=config_store)
+
+    assert "孙总" in window.overview_page.displayed_customer_names()
+    assert "MW1" not in window.overview_page.displayed_customer_names()
+    assert "MW1" in window.customer_library_page.displayed_customer_names()
     window.close()
     app.processEvents()
 
@@ -213,7 +265,8 @@ def test_project_management_page_uses_single_expand_panel_and_year_shortcuts():
     labels = [label.text() for label in page.findChildren(QLabel)]
     assert any("MW1短视频拍摄合同" in text for text in labels)
     assert any("审批中" in text for text in labels)
-    assert len([button for button in page.findChildren(QPushButton) if button.text() == "收起详情"]) >= 2
+    assert len([button for button in page.findChildren(QPushButton) if button.text() == "收起详情"]) == 1
+    assert len([button for button in page.findChildren(QPushButton) if button.text() == "查看项目"]) == 0
     page.close()
     app.processEvents()
 
@@ -547,6 +600,8 @@ def test_settings_page_shows_minimax_route_hint():
     labels = [label.text() for label in page.findChildren(type(page.status_label))]
 
     assert any("中国大陆" in text and "Global" in text for text in labels)
+    assert page.customer_types_edit.toPlainText()
+    assert "小时达" in page.secondary_tags_edit.toPlainText()
     page.close()
     app.processEvents()
 
@@ -611,8 +666,8 @@ def test_overview_page_filters_customer_type_and_updates_metrics():
     page.type_filter_combo.setCurrentText("网店KA客户")
 
     assert page.displayed_customer_names() == ["青竹画材官方旗舰店"]
-    assert page.metric_value_labels["已合作"].text() == "1"
-    assert "网店KA客户" in page.meta_label.text()
+    assert page.metric_value_labels["待排期"].text() == "1"
+    assert page.filter_badge_label.text() == "筛选：网店KA客户"
     page.close()
     app.processEvents()
 
@@ -657,6 +712,199 @@ def test_overview_page_orders_customers_by_latest_update_first():
     app.processEvents()
 
 
+def test_overview_hides_archived_customer_but_library_can_filter_it():
+    app = build_app()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    records = [
+        CustomerRecord(
+            name="孙总",
+            customer_type="博主 / 网店店群客户",
+            stage="沟通中",
+            secondary_tags="小时达 / 微信",
+            business_direction="AI商品图 / AI详情页推广",
+            next_action="明天回来确认推广坑位、报价和排期",
+            next_follow_up_date=tomorrow,
+            updated_at="2026-04-27",
+        ),
+        CustomerRecord(
+            name="MW1",
+            customer_type="品牌客户",
+            stage="已归档",
+            business_direction="短视频拍摄",
+            next_action="去年合作已结束并收档",
+            next_follow_up_date="已归档",
+            updated_at="2026-04-27",
+        ),
+    ]
+
+    overview = OverviewPage()
+    overview.set_customers(records)
+    assert overview.displayed_customer_names() == ["孙总"]
+    assert overview.metric_value_labels["明天"].text() == "1"
+
+    library = CustomerLibraryPage()
+    library.set_customers(records)
+    library.stage_filter_combo.setCurrentText("已归档")
+    assert library.displayed_customer_names() == ["MW1"]
+
+    overview.close()
+    library.close()
+    app.processEvents()
+
+
+def test_main_window_overview_follow_up_action_can_undo_last_change(tmp_path):
+    customer_root = tmp_path / "客户管理"
+    customer_root.mkdir()
+    store = MarkdownCustomerStore(customer_root)
+    today = date.today().isoformat()
+    original_action = "今天确认拍摄时间和物流"
+    store.upsert_customer(
+        CustomerDraft(
+            name="爱慕儿童",
+            customer_type="品牌客户",
+            stage="已合作",
+            business_direction="视频拍摄 / 品牌合作",
+            current_need="确认拍摄排期",
+            next_action=original_action,
+            next_follow_up_date=today,
+            communication=CommunicationEntry(entry_date=today, summary="今天待跟进"),
+        )
+    )
+
+    config_path = tmp_path / "config.json"
+    config_store = ConfigStore(config_path)
+    config_store.save(
+        {
+            "customer_root": str(customer_root),
+            "project_root": str(tmp_path / "项目数据"),
+            "main_work_root": str(tmp_path / "主业"),
+            "approval_inbox_root": str(tmp_path / "钉钉审批导入"),
+        }
+    )
+
+    app = build_app()
+    window = MainWindow(config_store=config_store)
+    window.show()
+    app.processEvents()
+
+    window._handle_customer_follow_up_action("爱慕儿童", "complete")
+    changed_detail = window._store.get_customer("爱慕儿童")
+    assert changed_detail.next_action == ""
+    assert "爱慕儿童" not in window.overview_page.displayed_customer_names()
+    assert not window.overview_page.undo_bar.isHidden()
+
+    window.overview_page.undo_button.click()
+    app.processEvents()
+
+    restored_detail = window._store.get_customer("爱慕儿童")
+    assert restored_detail.next_action == original_action
+    assert restored_detail.next_follow_up_date == today
+    assert window.overview_page.undo_bar.isHidden()
+
+    window.close()
+    app.processEvents()
+
+
+def test_customer_library_page_search_and_detail_actions():
+    app = build_app()
+    page = CustomerLibraryPage()
+    page.set_customers(
+        [
+            CustomerRecord(
+                name="孙总",
+                customer_type="博主 / 网店店群客户",
+                stage="沟通中",
+                secondary_tags="小时达 / 微信",
+                business_direction="AI商品图 / AI详情页推广",
+                current_need="确认推广合作",
+                recent_progress="等孙总回来确认坑位和报价",
+                next_action="明天继续确认推广排期",
+                next_follow_up_date="2026-04-28",
+                updated_at="2026-04-27",
+                contact="孙总",
+            ),
+            CustomerRecord(
+                name="MW1",
+                customer_type="品牌客户",
+                stage="已归档",
+                business_direction="短视频拍摄",
+                next_action="去年合作已结束并收档",
+                next_follow_up_date="已归档",
+                updated_at="2026-04-26",
+                contact="Mia",
+            ),
+        ]
+    )
+
+    page.search_edit.setText("小时达")
+    assert page.displayed_customer_names() == ["孙总"]
+
+    page.show_customer_detail(
+        CustomerDetail(
+            name="MW1",
+            customer_type="品牌客户",
+            stage="已归档",
+            business_direction="短视频拍摄",
+            next_action="保留历史资料，后续仅查询",
+            next_follow_up_date="已归档",
+            contact="Mia",
+            communication_entries=[
+                CommunicationEntry(
+                    entry_date="2026-04-26",
+                    summary="确认本轮合作结束，档案收口。",
+                    next_step="保留素材和合同记录。",
+                )
+            ],
+        )
+    )
+
+    assert page.edit_button.isEnabled()
+    assert page.projects_button.isEnabled()
+    assert not page.archive_button.isEnabled()
+    assert "保留历史资料" in page.detail_browser.toPlainText()
+    page.close()
+    app.processEvents()
+
+
+def test_overview_collapses_customer_and_project_when_follow_up_is_same_thing():
+    app = build_app()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    overview = OverviewPage()
+    overview.set_customers(
+        [
+            CustomerRecord(
+                name="孙总",
+                customer_type="博主 / 网店店群客户",
+                stage="沟通中",
+                business_direction="AI商品图 / AI详情页推广",
+                next_action="孙总明天回来后，继续确认推广坑位、报价、排期，以及小时达/微信场景是否一起推进。",
+                next_follow_up_date=tomorrow,
+                updated_at="2026-04-27",
+            )
+        ]
+    )
+    overview.set_follow_up_projects(
+        [
+            ProjectRecord(
+                brand_customer_name="孙总",
+                project_name="2026-04 孙总AI商品图推广合作跟进",
+                    stage="推进中",
+                    year="2026",
+                    project_type="博主推广",
+                    current_focus="等待孙总回来确认推广合作细节",
+                    next_action="孙总明天回来后，继续确认推广合作报价、坑位、排期，以及小时达/微信场景需求。",
+                    next_follow_up_date=tomorrow,
+                    updated_at="2026-04-27",
+                )
+            ]
+    )
+
+    assert overview.displayed_follow_up_titles() == ["孙总 · 2026-04 孙总AI商品图推广合作跟进"]
+    assert overview.metric_value_labels["明天"].text() == "1"
+    overview.close()
+    app.processEvents()
+
+
 def test_overview_page_emits_manual_edit_for_current_customer():
     app = build_app()
     page = OverviewPage()
@@ -689,7 +937,7 @@ def test_overview_quick_capture_button_switches_to_capture_page(tmp_path):
 
     window.overview_page.quick_capture_button.click()
 
-    assert window.nav.currentRow() == 1
+    assert window.nav.currentRow() == 2
     window.close()
     app.processEvents()
 
@@ -719,7 +967,7 @@ def test_main_window_prepares_existing_customer_for_manual_edit(tmp_path):
 
     window._prepare_existing_customer_edit("爱慕")
 
-    assert window.nav.currentRow() == 1
+    assert window.nav.currentRow() == 2
     assert window.quick_capture_page.name_edit.text() == "爱慕"
     assert window.quick_capture_page.target_customer_name == "爱慕"
     assert "手动编辑" in window.quick_capture_page.target_context_label.text()
@@ -752,7 +1000,7 @@ def test_main_window_prepares_existing_customer_for_ai_update(tmp_path):
 
     window._prepare_existing_customer_update("爱慕")
 
-    assert window.nav.currentRow() == 1
+    assert window.nav.currentRow() == 2
     assert window.quick_capture_page.name_edit.text() == "爱慕"
     assert window.quick_capture_page.type_combo.currentText() == "品牌客户"
     assert window.quick_capture_page.stage_combo.currentText() == "已合作"
@@ -890,6 +1138,8 @@ def test_settings_validate_describes_minimax_route(tmp_path):
     status = window.settings_page.status_label.text()
     assert "MiniMax 口径：中国大陆" in status
     assert "MiniMax Base URL：https://api.minimaxi.com/v1" in status
+    assert "客户类型选项" in status
+    assert "二级标签选项" in status
     window.close()
     app.processEvents()
 
@@ -982,7 +1232,7 @@ def test_overview_project_button_switches_to_project_management_page(tmp_path):
     )
     window.overview_page.view_projects_button.click()
 
-    assert window.nav.currentRow() == 2
+    assert window.nav.currentRow() == 3
     window.close()
     app.processEvents()
 
@@ -1008,6 +1258,6 @@ def test_overview_project_button_supports_shop_ka_customer(tmp_path):
     assert window.overview_page.view_projects_button.isEnabled()
     window.overview_page.view_projects_button.click()
 
-    assert window.nav.currentRow() == 2
+    assert window.nav.currentRow() == 3
     window.close()
     app.processEvents()

@@ -10,11 +10,13 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from strawberry_customer_management.ai_capture import MINIMAX_BASE_URL, MINIMAX_GLOBAL_BASE_URL
+from strawberry_customer_management.models import CUSTOMER_TYPES, SECONDARY_TAGS
 
 
 class SettingsPage(QWidget):
@@ -51,7 +53,7 @@ class SettingsPage(QWidget):
         topbar_text.setSpacing(4)
         header = QLabel("设置")
         header.setObjectName("SectionTitle")
-        hint = QLabel("这里主要确认 Obsidian 客户数据路径、项目数据路径、主业文件根路径，以及 MiniMax 是走中国大陆还是 Global 接口。")
+        hint = QLabel("")
         hint.setObjectName("SectionHint")
         hint.setWordWrap(True)
         topbar_text.addWidget(header)
@@ -83,7 +85,7 @@ class SettingsPage(QWidget):
         path_layout.setSpacing(10)
         path_title = QLabel("路径配置")
         path_title.setObjectName("PanelTitle")
-        path_hint = QLabel("这些目录决定客户资料、项目资料和审批导入箱的读写位置。")
+        path_hint = QLabel("")
         path_hint.setObjectName("SectionHint")
         path_hint.setWordWrap(True)
         path_layout.addWidget(path_title)
@@ -105,7 +107,7 @@ class SettingsPage(QWidget):
         ai_layout.setSpacing(10)
         ai_title = QLabel("AI 配置")
         ai_title.setObjectName("PanelTitle")
-        ai_hint = QLabel("MiniMax 配置会同时用于快速录入和截图识别。")
+        ai_hint = QLabel("")
         ai_hint.setObjectName("SectionHint")
         ai_hint.setWordWrap(True)
         ai_layout.addWidget(ai_title)
@@ -152,17 +154,46 @@ class SettingsPage(QWidget):
         ai_form.addRow("MiniMax Base URL（中国大陆 / Global）", self.minimax_base_url_edit)
         ai_layout.addLayout(ai_form)
 
-        minimax_route_hint = QLabel(
-            "推荐口径：\n"
-            f"- 中国大陆：{MINIMAX_BASE_URL}\n"
-            f"- Global：{MINIMAX_GLOBAL_BASE_URL}\n"
-            "如果你使用 `sk-cp-...` 这类 MiniMax key，通常应优先使用中国大陆地址。\n"
-            "快速录入里的截图识别也会复用这里的 MiniMax Key 和 Base URL。"
-        )
+        minimax_route_hint = QLabel("")
         minimax_route_hint.setObjectName("SectionHint")
         minimax_route_hint.setWordWrap(True)
         ai_layout.addWidget(minimax_route_hint)
         ai_layout.addStretch(1)
+
+        taxonomy_card = QFrame()
+        taxonomy_card.setObjectName("WorkspacePanel")
+        taxonomy_card.setProperty("settingsRole", "taxonomy")
+        taxonomy_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        taxonomy_layout = QVBoxLayout(taxonomy_card)
+        taxonomy_layout.setContentsMargins(16, 16, 16, 16)
+        taxonomy_layout.setSpacing(10)
+        taxonomy_title = QLabel("分类选项配置")
+        taxonomy_title.setObjectName("PanelTitle")
+        taxonomy_hint = QLabel("")
+        taxonomy_hint.setObjectName("SectionHint")
+        taxonomy_hint.setWordWrap(True)
+        taxonomy_layout.addWidget(taxonomy_title)
+        taxonomy_layout.addWidget(taxonomy_hint)
+
+        taxonomy_form = QFormLayout()
+        taxonomy_form.setContentsMargins(0, 4, 0, 0)
+        taxonomy_form.setSpacing(12)
+        taxonomy_form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+        taxonomy_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        taxonomy_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self.customer_types_edit = QTextEdit()
+        self.secondary_tags_edit = QTextEdit()
+        self.customer_types_edit.setPlaceholderText("品牌客户\n网店KA客户\n网店店群客户\n博主")
+        self.secondary_tags_edit.setPlaceholderText("小时达\n微信\nAI商品图\nAI详情页")
+        self.customer_types_edit.setPlainText("\n".join(CUSTOMER_TYPES))
+        self.secondary_tags_edit.setPlainText("\n".join(SECONDARY_TAGS))
+        for editor in (self.customer_types_edit, self.secondary_tags_edit):
+            editor.setMinimumWidth(280)
+            editor.setFixedHeight(132)
+            editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        taxonomy_form.addRow("客户类型选项", self.customer_types_edit)
+        taxonomy_form.addRow("二级标签选项", self.secondary_tags_edit)
+        taxonomy_layout.addLayout(taxonomy_form)
 
         status_card = QFrame()
         status_card.setObjectName("WorkspacePanel")
@@ -173,7 +204,7 @@ class SettingsPage(QWidget):
         status_layout.setSpacing(10)
         status_title = QLabel("状态检查")
         status_title.setObjectName("PanelTitle")
-        status_hint = QLabel("保存后可刷新数据，或先校验路径是否能被应用正常访问。")
+        status_hint = QLabel("")
         status_hint.setObjectName("SectionHint")
         status_hint.setWordWrap(True)
 
@@ -189,6 +220,7 @@ class SettingsPage(QWidget):
         root.addWidget(topbar)
         root.addWidget(path_card)
         root.addWidget(ai_card)
+        root.addWidget(taxonomy_card)
         root.addWidget(status_card)
         root.addStretch(1)
 
@@ -201,6 +233,8 @@ class SettingsPage(QWidget):
         minimax_api_key: str = "",
         minimax_model: str = "",
         minimax_base_url: str = "",
+        customer_types: list[str] | tuple[str, ...] | None = None,
+        secondary_tags: list[str] | tuple[str, ...] | None = None,
     ) -> None:
         self.customer_root_edit.setText(customer_root)
         self.project_root_edit.setText(project_root)
@@ -209,6 +243,8 @@ class SettingsPage(QWidget):
         self.minimax_api_key_edit.setText(minimax_api_key)
         self.minimax_model_edit.setText(minimax_model)
         self.minimax_base_url_edit.setText(minimax_base_url)
+        self.customer_types_edit.setPlainText("\n".join(customer_types or CUSTOMER_TYPES))
+        self.secondary_tags_edit.setPlainText("\n".join(secondary_tags or SECONDARY_TAGS))
 
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
@@ -224,5 +260,23 @@ class SettingsPage(QWidget):
                 "minimax_api_key": self.minimax_api_key_edit.text().strip(),
                 "minimax_model": self.minimax_model_edit.text().strip(),
                 "minimax_base_url": self.minimax_base_url_edit.text().strip(),
+                "customer_types": _parse_options_text(self.customer_types_edit.toPlainText()),
+                "secondary_tags": _parse_options_text(self.secondary_tags_edit.toPlainText()),
             }
         )
+
+
+def _parse_options_text(text: str) -> list[str]:
+    options: list[str] = []
+    seen: set[str] = set()
+    for raw_line in text.splitlines():
+        cleaned = raw_line.strip().lstrip("-*•").strip()
+        if not cleaned:
+            continue
+        for part in cleaned.replace("，", "/").replace(",", "/").replace("、", "/").split("/"):
+            option = part.strip()
+            if not option or option in seen:
+                continue
+            options.append(option)
+            seen.add(option)
+    return options

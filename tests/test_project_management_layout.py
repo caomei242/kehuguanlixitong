@@ -5,10 +5,10 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QTextEdit
+from PySide6.QtWidgets import QApplication, QLineEdit, QTextEdit
 
 from strawberry_customer_management.markdown_store import sort_project_records
-from strawberry_customer_management.models import ApprovalEntry, PartyAInfo, ProjectDetail, ProjectRecord
+from strawberry_customer_management.models import ApprovalEntry, PartyAInfo, ProjectDetail, ProjectProgressNode, ProjectRecord, ProjectRole
 from strawberry_customer_management.ui.pages.project_management_page import (
     ApprovalInboxDropZone,
     ProjectManagementPage,
@@ -21,7 +21,7 @@ def _app() -> QApplication:
 
 
 def _sample_record() -> ProjectRecord:
-    return ProjectRecord(
+    record = ProjectRecord(
         brand_customer_name="爱慕儿童",
         project_name="2026-04 爱慕儿童春夏短视频拍摄制作服务合同",
         stage="推进中",
@@ -31,11 +31,13 @@ def _sample_record() -> ProjectRecord:
         next_action="补齐寄送资料后推进盖章",
         latest_approval_status="审批中 · 业务Owner / tiger",
     )
+    object.__setattr__(record, "next_follow_up_date", "2026-05-08")
+    return record
 
 
 def _sample_detail() -> ProjectDetail:
     record = _sample_record()
-    return ProjectDetail(
+    detail = ProjectDetail(
         brand_customer_name=record.brand_customer_name,
         project_name=record.project_name,
         stage=record.stage,
@@ -48,6 +50,30 @@ def _sample_detail() -> ProjectDetail:
         latest_approval_status=record.latest_approval_status,
         risk="纸质文件寄送和审批节点要继续盯住",
         default_party_a_info=PartyAInfo(contact="李岩", phone="17778019272", email="rellaliyan@aimer.com.cn"),
+        participant_roles=[
+            ProjectRole(name="李岩", role="品牌方 / 甲方", responsibility="负责合同回寄和品牌方向确认。"),
+            ProjectRole(name="小苏", role="实施商", responsibility="负责达人收货、拍摄准备与执行。", note="今天先催达人收货截图。"),
+        ],
+        progress_nodes=[
+            ProjectProgressNode(
+                node_name="合同回寄与盖章",
+                status="进行中",
+                owner="李岩",
+                collaborators="草莓 / tiger",
+                planned_date="2026-04-30",
+                risk="到件后需及时盖章留底。",
+                next_action="确认合同到件并补盖章闭环。",
+            ),
+            ProjectProgressNode(
+                node_name="达人收货与拍摄准备",
+                status="卡住",
+                owner="小苏",
+                planned_date="2026-04-29",
+                risk="回执未齐，影响拍摄排期。",
+                next_action="先催达人收货截图，再安排拍摄档期。",
+            ),
+        ],
+        progress_markdown="- 熊伟预计 2026-05-10 给到小苏，后续单独留意。",
         materials_markdown="- 合同模板.docx\n- 授权委托书.docx\n- 项目确认单.docx",
         notes_markdown="- 已从桌面项目同步资料。\n- 等待审批通过后补齐归档状态。",
         approval_entries=[
@@ -60,6 +86,8 @@ def _sample_detail() -> ProjectDetail:
             )
         ],
     )
+    object.__setattr__(detail, "next_follow_up_date", "2026-05-08")
+    return detail
 
 
 def test_project_management_page_keeps_import_area_compact() -> None:
@@ -76,6 +104,8 @@ def test_project_management_page_keeps_import_area_compact() -> None:
     assert drop_zone.maximumHeight() <= 76
     assert screenshot_widget is not None
     assert screenshot_widget.maximumHeight() <= 86
+    assert page.toolbox_content.isHidden()
+    assert page.toolbox_toggle_button.text() == "展开审批导入"
 
 
 def test_project_management_expanded_detail_caps_long_text_fields() -> None:
@@ -90,6 +120,8 @@ def test_project_management_expanded_detail_caps_long_text_fields() -> None:
         "current_focus_edit",
         "next_action_edit",
         "risk_edit",
+        "participant_roles_markdown_edit",
+        "progress_markdown_edit",
         "party_a_address_edit",
         "materials_edit",
         "notes_edit",
@@ -101,6 +133,47 @@ def test_project_management_expanded_detail_caps_long_text_fields() -> None:
         assert isinstance(widget, QTextEdit)
         assert widget.minimumHeight() == widget.maximumHeight()
         assert widget.maximumHeight() <= 86
+
+
+def test_project_management_expanded_form_emits_next_follow_up_date() -> None:
+    _app()
+    page = ProjectManagementPage()
+
+    record = _sample_record()
+    page.set_projects([record], selected_project=(record.brand_customer_name, record.project_name))
+    page.set_project_detail(_sample_detail())
+    next_follow_up_date_edit = page._active_widgets["next_follow_up_date_edit"]
+    assert isinstance(next_follow_up_date_edit, QLineEdit)
+    assert next_follow_up_date_edit.text() == "2026-05-08"
+    next_follow_up_date_edit.setText("2026-05-15")
+
+    emitted = []
+    page.save_requested.connect(emitted.append)
+    page._emit_save_requested()
+
+    assert len(emitted) == 1
+    assert getattr(emitted[0], "next_follow_up_date") == "2026-05-15"
+    page.close()
+
+
+def test_project_management_detail_drawer_exposes_case_board_sections() -> None:
+    _app()
+    page = ProjectManagementPage()
+
+    record = _sample_record()
+    page.set_projects([record], selected_project=(record.brand_customer_name, record.project_name))
+    page.set_project_detail(_sample_detail())
+
+    label_texts = {label.text() for label in page.findChildren(type(page.meta_label))}
+
+    assert "Case 概览" in label_texts
+    assert "流程节点" in label_texts
+    assert "参与角色" in label_texts
+    assert "快速补充" in label_texts
+    assert "项目详情" in label_texts
+    assert "小苏" in label_texts
+    assert "达人收货与拍摄准备" in label_texts
+    page.close()
 
 
 def test_project_management_sorts_latest_update_first_with_placeholder_dates_last() -> None:

@@ -5,7 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QFrame, QLineEdit, QPushButton, QSizePolicy
+from PySide6.QtWidgets import QApplication, QFrame, QLineEdit, QPushButton, QSizePolicy, QTextEdit
 
 from strawberry_customer_management.ui.pages.settings_page import SettingsPage
 
@@ -30,12 +30,15 @@ def test_settings_page_keeps_scroll_area_and_workspace_cards() -> None:
     path_panel = _settings_panel(page, "paths")
     ai_panel = _settings_panel(page, "ai")
     status_panel = _settings_panel(page, "status")
+    taxonomy_panel = _settings_panel(page, "taxonomy")
 
     assert path_panel.objectName() == "WorkspacePanel"
     assert ai_panel.objectName() == "WorkspacePanel"
     assert status_panel.objectName() == "WorkspacePanel"
+    assert taxonomy_panel.objectName() == "WorkspacePanel"
     assert path_panel.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
     assert ai_panel.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+    assert taxonomy_panel.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
 
 
 def test_settings_fields_expand_inside_their_cards() -> None:
@@ -74,6 +77,8 @@ def test_settings_save_payload_stays_compatible() -> None:
         minimax_api_key=" sk-cp-test ",
         minimax_model="MiniMax-M2.7",
         minimax_base_url="https://api.minimax.chat/v1",
+        customer_types=["品牌客户", "博主"],
+        secondary_tags=["小时达", "微信", "AI商品图"],
     )
 
     emitted: list[object] = []
@@ -90,8 +95,30 @@ def test_settings_save_payload_stays_compatible() -> None:
             "minimax_api_key": "sk-cp-test",
             "minimax_model": "MiniMax-M2.7",
             "minimax_base_url": "https://api.minimax.chat/v1",
+            "customer_types": ["品牌客户", "博主"],
+            "secondary_tags": ["小时达", "微信", "AI商品图"],
         }
     ]
+
+
+def test_settings_taxonomy_fields_parse_one_option_per_line() -> None:
+    _app()
+    page = SettingsPage()
+    page.customer_types_edit.setPlainText("品牌客户\n博主\n网店店群客户")
+    page.secondary_tags_edit.setPlainText("小时达/微信\nAI商品图\nAI商品图")
+
+    emitted: list[object] = []
+    page.save_requested.connect(emitted.append)
+    page._emit_save()
+
+    payload = emitted[0]
+    assert isinstance(payload, dict)
+    assert payload["customer_types"] == ["品牌客户", "博主", "网店店群客户"]
+    assert payload["secondary_tags"] == ["小时达", "微信", "AI商品图"]
+
+    taxonomy_panel = _settings_panel(page, "taxonomy")
+    assert page.customer_types_edit in taxonomy_panel.findChildren(QTextEdit)
+    assert page.secondary_tags_edit in taxonomy_panel.findChildren(QTextEdit)
 
 
 def test_settings_actions_are_visible_in_short_window() -> None:

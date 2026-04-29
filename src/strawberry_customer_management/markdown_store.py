@@ -20,6 +20,14 @@ PLACEHOLDER_NAMES = {"待录入", "暂无"}
 PLACEHOLDER_UPDATED_AT = {"", "待同步", "待补充", "待确认", "待补日期"}
 
 
+def _split_multi_value(value: str) -> list[str]:
+    return [part.strip() for part in re.split(r"\s*/\s*|[，,、]", value) if part.strip()]
+
+
+def _has_customer_type(value: str, customer_type: str) -> bool:
+    return customer_type in _split_multi_value(value)
+
+
 def _strip_code(value: str) -> str:
     value = value.strip()
     if value.startswith("`") and value.endswith("`") and len(value) >= 2:
@@ -39,6 +47,10 @@ def _extract_wikilink_target(value: str) -> str:
 def _split_markdown_row(line: str) -> list[str]:
     stripped = line.strip().strip("|")
     return [_clean_cell(cell) for cell in stripped.split("|")]
+
+
+def _format_markdown_row(cells: list[str]) -> str:
+    return "| " + " | ".join(cells) + " |"
 
 
 def _is_separator_row(cells: list[str]) -> bool:
@@ -66,6 +78,29 @@ def _ensure_section(text: str, heading: str, default_body: str = "") -> str:
     else:
         normalized_body = "\n"
     return text.rstrip() + f"\n\n## {heading}{normalized_body}"
+
+
+def _replace_table_header(text: str, heading: str, header_body: str) -> str:
+    body = _section_body(text, heading)
+    lines = body.splitlines()
+    table_indexes = [index for index, line in enumerate(lines) if line.strip().startswith("|")]
+    header_lines = header_body.splitlines()
+    if len(table_indexes) < 2 or len(header_lines) < 2:
+        return text
+    target_header = _split_markdown_row(header_lines[0])
+    target_separator = _split_markdown_row(header_lines[1])
+    old_header = _split_markdown_row(lines[table_indexes[0]])
+    lines[table_indexes[0]] = _format_markdown_row(target_header)
+    lines[table_indexes[1]] = _format_markdown_row(target_separator)
+    for row_index in table_indexes[2:]:
+        cells = _split_markdown_row(lines[row_index])
+        if _is_separator_row(cells):
+            continue
+        if len(cells) < len(old_header):
+            cells.extend([""] * (len(old_header) - len(cells)))
+        by_header = dict(zip(old_header, cells))
+        lines[row_index] = _format_markdown_row([by_header.get(column, "") for column in target_header])
+    return _replace_section_body(text, heading, "\n".join(lines).rstrip() + "\n")
 
 
 def _bullet_map(section: str) -> dict[str, str]:
@@ -117,7 +152,7 @@ def _parse_table(section: str) -> list[dict[str, str]]:
 def _format_brand_row(record: CustomerRecord) -> str:
     return (
         f"| {record.name} | {record.stage} | {record.business_direction} | "
-        f"{record.current_need} | {record.recent_progress} | {record.next_action} | "
+        f"{record.current_need} | {record.recent_progress} | {record.next_action} | {record.next_follow_up_date} | "
         f"{record.contact} | [[客户/客户--{record.name}]] | {record.updated_at} |"
     )
 
@@ -125,7 +160,7 @@ def _format_brand_row(record: CustomerRecord) -> str:
 def _format_shop_group_row(record: CustomerRecord) -> str:
     return (
         f"| {record.name} | {record.stage} | {record.business_direction} | {record.shop_scale} | "
-        f"{record.current_need} | {record.recent_progress} | {record.next_action} | "
+        f"{record.current_need} | {record.recent_progress} | {record.next_action} | {record.next_follow_up_date} | "
         f"{record.contact} | [[客户/客户--{record.name}]] | {record.updated_at} |"
     )
 
@@ -133,7 +168,16 @@ def _format_shop_group_row(record: CustomerRecord) -> str:
 def _format_shop_ka_row(record: CustomerRecord) -> str:
     return (
         f"| {record.name} | {record.stage} | {record.business_direction} | {record.shop_scale} | "
-        f"{record.current_need} | {record.recent_progress} | {record.next_action} | "
+        f"{record.current_need} | {record.recent_progress} | {record.next_action} | {record.next_follow_up_date} | "
+        f"{record.contact} | [[客户/客户--{record.name}]] | {record.updated_at} |"
+    )
+
+
+def _format_blogger_row(record: CustomerRecord) -> str:
+    secondary_tags = record.secondary_tags or "待补充"
+    return (
+        f"| {record.name} | {record.stage} | {record.business_direction} | {record.customer_type} | {secondary_tags} | "
+        f"{record.current_need} | {record.recent_progress} | {record.next_action} | {record.next_follow_up_date} | "
         f"{record.contact} | [[客户/客户--{record.name}]] | {record.updated_at} |"
     )
 
@@ -324,10 +368,11 @@ class MarkdownCustomerStore:
         records = self._records_from_section(text, "品牌客户总表", "品牌客户")
         records.extend(self._records_from_section(text, "网店KA客户总表", "网店KA客户"))
         records.extend(self._records_from_section(text, "网店店群客户总表", "网店店群客户"))
+        records.extend(self._records_from_section(text, "博主总表", "博主"))
         return records
 
     def list_focus_customers(self) -> list[CustomerRecord]:
-        return [record for record in self.list_customers() if record.stage != "暂缓"][:3]
+        return [record for record in self.list_customers() if record.stage not in {"暂缓", "已归档"}][:3]
 
     def get_customer(self, name: str) -> CustomerDetail:
         path = self._customer_path(name)
@@ -346,10 +391,12 @@ class MarkdownCustomerStore:
             name=basic.get("客户名称", name),
             customer_type=basic.get("客户类型", ""),
             stage=judgement.get("阶段", ""),
+            secondary_tags=basic.get("二级标签", ""),
             business_direction=profile.get("主要业务方向", ""),
             current_need=need.get("需求一句话", ""),
             recent_progress=latest_summary,
             next_action=judgement.get("下次动作", ""),
+            next_follow_up_date=judgement.get("下次跟进日期", ""),
             contact=basic.get("当前联系人", ""),
             page_link=f"[[客户/客户--{name}]]",
             updated_at=judgement.get("更新时间", ""),
@@ -433,12 +480,14 @@ class MarkdownCustomerStore:
             records.append(
                 CustomerRecord(
                     name=name,
-                    customer_type=customer_type,
+                    customer_type=(row.get("客户类型", "").strip() or customer_type),
                     stage=row.get("阶段", "").strip(),
+                    secondary_tags=row.get("二级标签", "").strip(),
                     business_direction=row.get("业务方向", "").strip(),
                     current_need=row.get("当前需求", "").strip(),
                     recent_progress=row.get("最近推进", "").strip(),
                     next_action=row.get("下次动作", "").strip(),
+                    next_follow_up_date=row.get("下次跟进日期", "").strip(),
                     contact=row.get("主联系人", "").strip(),
                     page_link=page_link,
                     updated_at=row.get("更新时间", "").strip(),
@@ -468,22 +517,27 @@ class MarkdownCustomerStore:
         return entries
 
     def _build_new_page(self, draft: CustomerDraft, updated_at: str) -> str:
-        is_shop_group = draft.customer_type == "网店店群客户"
-        is_shop_ka = draft.customer_type == "网店KA客户"
+        is_shop_group = _has_customer_type(draft.customer_type, "网店店群客户")
+        is_shop_ka = _has_customer_type(draft.customer_type, "网店KA客户")
+        is_blogger = _has_customer_type(draft.customer_type, "博主")
         default_main_work_path = (
             f"/Users/gd/Desktop/主业/品牌项目/品牌--{draft.name}/"
-            if draft.customer_type == "品牌客户"
+            if _has_customer_type(draft.customer_type, "品牌客户")
             else "待补充"
         )
-        contract_payment = "待补充"
+        contract_payment_parts: list[str] = []
         if is_shop_group:
-            contract_payment = "关注批量折扣、付款方式、开票/合同需求"
-        elif is_shop_ka:
-            contract_payment = "已付费产品使用深化、功能跟进、增购/新功能转化"
+            contract_payment_parts.append("关注批量折扣、付款方式、开票/合同需求")
+        if is_shop_ka:
+            contract_payment_parts.append("已付费产品使用深化、功能跟进、增购/新功能转化")
+        if is_blogger:
+            contract_payment_parts.insert(0, "功能推广合作、内容排期、样稿/报价及使用者转化情况")
+        contract_payment = "；".join(contract_payment_parts) or "待补充"
         return f"""# 客户--{draft.name}
 
 ## 基本信息
 - 客户类型：{draft.customer_type}
+- 二级标签：{draft.secondary_tags or "待补充"}
 - 客户名称：{draft.name}
 - 所属公司/主体：{draft.company or "待补充"}
 - 当前联系人：{draft.contact or "待补充"}
@@ -512,6 +566,7 @@ class MarkdownCustomerStore:
 - 当前重点：{draft.current_need or "待补充"}
 - 合作可能性：待补充
 - 下次动作：{draft.next_action or "待补充"}
+- 下次跟进日期：{draft.next_follow_up_date or "待补充"}
 - 更新时间：{updated_at}
 
 ## 当前需求
@@ -540,6 +595,7 @@ class MarkdownCustomerStore:
         text = self._ensure_customer_sections(text)
         updates = [
             ("基本信息", "客户类型", draft.customer_type),
+            ("基本信息", "二级标签", draft.secondary_tags),
             ("基本信息", "客户名称", draft.name),
             ("基本信息", "所属公司/主体", draft.company),
             ("基本信息", "当前联系人", draft.contact),
@@ -560,6 +616,7 @@ class MarkdownCustomerStore:
             ("当前判断", "阶段", draft.stage),
             ("当前判断", "当前重点", draft.current_need),
             ("当前判断", "下次动作", draft.next_action),
+            ("当前判断", "下次跟进日期", draft.next_follow_up_date),
             ("当前判断", "更新时间", updated_at),
             ("当前需求", "需求一句话", draft.current_need),
             ("当前需求", "交付物/采购内容", draft.business_direction),
@@ -599,9 +656,11 @@ class MarkdownCustomerStore:
             main_work_path=detail.main_work_path,
             external_material_path=detail.external_material_path,
             shop_scale=detail.shop_scale,
+            secondary_tags=detail.secondary_tags,
             current_need=detail.current_need,
             recent_progress=detail.recent_progress,
             next_action=detail.next_action,
+            next_follow_up_date=detail.next_follow_up_date,
             party_a_brand=detail.party_a_brand,
             party_a_company=detail.party_a_company,
             party_a_contact=detail.party_a_contact,
@@ -633,24 +692,28 @@ class MarkdownCustomerStore:
         text = self._ensure_summary_sections(self.summary_path.read_text(encoding="utf-8"))
         original_name = draft.original_name.strip()
         if original_name and original_name != draft.name:
-            for section_name in ("本周重点跟进", "品牌客户总表", "网店KA客户总表", "网店店群客户总表", "暂缓 / 待观察"):
+            for section_name in ("本周重点跟进", "品牌客户总表", "网店KA客户总表", "网店店群客户总表", "博主总表", "暂缓 / 待观察"):
                 text = self._remove_row_in_section(text, section_name, original_name)
         record = CustomerRecord(
             name=draft.name,
             customer_type=draft.customer_type,
             stage=draft.stage,
+            secondary_tags=draft.secondary_tags,
             business_direction=draft.business_direction,
             current_need=draft.current_need,
             recent_progress=draft.recent_progress,
             next_action=draft.next_action,
+            next_follow_up_date=draft.next_follow_up_date,
             contact=draft.contact,
             page_link=f"[[客户/客户--{draft.name}]]",
             updated_at=updated_at,
             shop_scale=draft.shop_scale,
         )
-        if draft.customer_type == "网店店群客户":
+        if _has_customer_type(draft.customer_type, "博主"):
+            text = self._upsert_row_in_section(text, "博主总表", draft.name, _format_blogger_row(record))
+        elif _has_customer_type(draft.customer_type, "网店店群客户"):
             text = self._upsert_row_in_section(text, "网店店群客户总表", draft.name, _format_shop_group_row(record))
-        elif draft.customer_type == "网店KA客户":
+        elif _has_customer_type(draft.customer_type, "网店KA客户"):
             text = self._upsert_row_in_section(text, "网店KA客户总表", draft.name, _format_shop_ka_row(record))
         else:
             text = self._upsert_row_in_section(text, "品牌客户总表", draft.name, _format_brand_row(record))
@@ -660,28 +723,33 @@ class MarkdownCustomerStore:
     def _ensure_summary_sections(self, text: str) -> str:
         sections = {
             "本周重点跟进": (
-                "| 客户 | 客户类型 | 当前需求 | 最近推进 | 下次动作 | 对应客户页 | 更新时间 |\n"
-                "| --- | --- | --- | --- | --- | --- | --- |"
+                "| 客户 | 客户类型 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 对应客户页 | 更新时间 |\n"
+                "| --- | --- | --- | --- | --- | --- | --- | --- |"
             ),
             "品牌客户总表": (
-                "| 客户 | 阶段 | 业务方向 | 当前需求 | 最近推进 | 下次动作 | 主联系人 | 对应客户页 | 更新时间 |\n"
-                "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+                "| 客户 | 阶段 | 业务方向 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 主联系人 | 对应客户页 | 更新时间 |\n"
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
             ),
             "网店KA客户总表": (
-                "| 客户 | 阶段 | 业务方向 | 店铺/产品状态 | 当前需求 | 最近推进 | 下次动作 | 主联系人 | 对应客户页 | 更新时间 |\n"
-                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+                "| 客户 | 阶段 | 业务方向 | 店铺/产品状态 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 主联系人 | 对应客户页 | 更新时间 |\n"
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
             ),
             "网店店群客户总表": (
-                "| 客户 | 阶段 | 业务方向 | 店铺规模 | 当前需求 | 最近推进 | 下次动作 | 主联系人 | 对应客户页 | 更新时间 |\n"
-                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+                "| 客户 | 阶段 | 业务方向 | 店铺规模 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 主联系人 | 对应客户页 | 更新时间 |\n"
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+            ),
+            "博主总表": (
+                "| 客户 | 阶段 | 业务方向 | 客户类型 | 二级标签 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 主联系人 | 对应客户页 | 更新时间 |\n"
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
             ),
             "暂缓 / 待观察": (
-                "| 客户 | 客户类型 | 暂缓原因 | 下次观察点 | 对应客户页 | 更新时间 |\n"
-                "| --- | --- | --- | --- | --- | --- |"
+                "| 客户 | 客户类型 | 暂缓原因 | 下次观察点 | 下次跟进日期 | 对应客户页 | 更新时间 |\n"
+                "| --- | --- | --- | --- | --- | --- | --- |"
             ),
         }
         for heading, body in sections.items():
             text = _ensure_section(text, heading, body)
+            text = _replace_table_header(text, heading, body)
         return text
 
     def _remove_row_in_section(self, text: str, section_name: str, name: str) -> str:
@@ -743,26 +811,31 @@ class MarkdownCustomerStore:
 
 ## 本周重点跟进
 
-| 客户 | 客户类型 | 当前需求 | 最近推进 | 下次动作 | 对应客户页 | 更新时间 |
-| --- | --- | --- | --- | --- | --- | --- |
+| 客户 | 客户类型 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 对应客户页 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
 
 ## 品牌客户总表
 
-| 客户 | 阶段 | 业务方向 | 当前需求 | 最近推进 | 下次动作 | 主联系人 | 对应客户页 | 更新时间 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 客户 | 阶段 | 业务方向 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 主联系人 | 对应客户页 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
 ## 网店KA客户总表
 
-| 客户 | 阶段 | 业务方向 | 店铺/产品状态 | 当前需求 | 最近推进 | 下次动作 | 主联系人 | 对应客户页 | 更新时间 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 客户 | 阶段 | 业务方向 | 店铺/产品状态 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 主联系人 | 对应客户页 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
 ## 网店店群客户总表
 
-| 客户 | 阶段 | 业务方向 | 店铺规模 | 当前需求 | 最近推进 | 下次动作 | 主联系人 | 对应客户页 | 更新时间 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 客户 | 阶段 | 业务方向 | 店铺规模 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 主联系人 | 对应客户页 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+
+## 博主总表
+
+| 客户 | 阶段 | 业务方向 | 客户类型 | 二级标签 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 主联系人 | 对应客户页 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
 ## 暂缓 / 待观察
 
-| 客户 | 客户类型 | 暂缓原因 | 下次观察点 | 对应客户页 | 更新时间 |
-| --- | --- | --- | --- | --- | --- |
+| 客户 | 客户类型 | 暂缓原因 | 下次观察点 | 下次跟进日期 | 对应客户页 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- |
 """

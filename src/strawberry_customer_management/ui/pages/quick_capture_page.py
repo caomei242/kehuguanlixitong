@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date
 
+import re
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
@@ -18,8 +20,67 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from strawberry_customer_management.models import CommunicationEntry, CustomerDetail, CustomerDraft, CUSTOMER_STAGES, CUSTOMER_TYPES
+from strawberry_customer_management.models import CommunicationEntry, CustomerDetail, CustomerDraft, CUSTOMER_STAGES, CUSTOMER_TYPES, SECONDARY_TAGS
 from strawberry_customer_management.ui.widgets.screenshot_input_widget import ScreenshotInputWidget
+
+
+class MultiSelectComboBox(QComboBox):
+    def __init__(self, options: tuple[str, ...], placeholder: str = "") -> None:
+        super().__init__()
+        self._placeholder = placeholder
+        self.setEditable(True)
+        self.lineEdit().setReadOnly(True)
+        self.lineEdit().setPlaceholderText(placeholder)
+        self.set_options(options)
+        self.view().pressed.connect(self._toggle_index)
+
+    def set_options(self, options: tuple[str, ...] | list[str]) -> None:
+        current_selection = set(self.selected_values()) if self.count() else set()
+        self.clear()
+        for option in options:
+            self.addItem(option)
+            item = self.model().item(self.count() - 1)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            state = Qt.CheckState.Checked if option in current_selection else Qt.CheckState.Unchecked
+            item.setData(state, Qt.ItemDataRole.CheckStateRole)
+        self.lineEdit().setPlaceholderText(self._placeholder)
+        self._refresh_text()
+
+    def selected_values(self) -> list[str]:
+        values: list[str] = []
+        for index in range(self.count()):
+            item = self.model().item(index)
+            if item.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked:
+                values.append(self.itemText(index))
+        return values
+
+    def currentText(self) -> str:  # type: ignore[override]
+        return " / ".join(self.selected_values())
+
+    def setCurrentText(self, text: str) -> None:  # type: ignore[override]
+        selected = set(_split_multi_value(text))
+        for index in range(self.count()):
+            item = self.model().item(index)
+            state = Qt.CheckState.Checked if self.itemText(index) in selected else Qt.CheckState.Unchecked
+            item.setData(state, Qt.ItemDataRole.CheckStateRole)
+        self._refresh_text()
+
+    def clear_selection(self) -> None:
+        self.setCurrentText("")
+
+    def _toggle_index(self, index) -> None:
+        item = self.model().itemFromIndex(index)
+        current = item.data(Qt.ItemDataRole.CheckStateRole)
+        next_state = Qt.CheckState.Unchecked if current == Qt.CheckState.Checked else Qt.CheckState.Checked
+        item.setData(next_state, Qt.ItemDataRole.CheckStateRole)
+        self._refresh_text()
+
+    def _refresh_text(self) -> None:
+        self.lineEdit().setText(self.currentText())
+
+
+def _split_multi_value(value: str) -> list[str]:
+    return [part.strip() for part in re.split(r"\s*/\s*|[，,、]", value) if part.strip()]
 
 
 class QuickCapturePage(QWidget):
@@ -33,6 +94,7 @@ class QuickCapturePage(QWidget):
         self.target_customer_name = ""
         self._locked_fields: set[str] = set()
         self.lock_buttons: dict[str, QPushButton] = {}
+        self._customer_types = tuple(CUSTOMER_TYPES)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -104,8 +166,8 @@ class QuickCapturePage(QWidget):
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
 
         self.name_edit = QLineEdit()
-        self.type_combo = QComboBox()
-        self.type_combo.addItems(CUSTOMER_TYPES)
+        self.type_combo = MultiSelectComboBox(CUSTOMER_TYPES, "可多选客户类型")
+        self.secondary_tags_combo = MultiSelectComboBox(SECONDARY_TAGS, "可多选二级标签")
         self.stage_combo = QComboBox()
         self.stage_combo.addItems(CUSTOMER_STAGES)
         self.business_edit = QLineEdit()
@@ -125,6 +187,8 @@ class QuickCapturePage(QWidget):
         self.need_edit.setFixedHeight(74)
         self.progress_edit = QLineEdit()
         self.next_action_edit = QLineEdit()
+        self.next_follow_up_date_edit = QLineEdit()
+        self.next_follow_up_date_edit.setPlaceholderText("YYYY-MM-DD")
         self.communication_date_edit = QLineEdit(date.today().isoformat())
         self.summary_edit = QTextEdit()
         self.summary_edit.setFixedHeight(64)
@@ -137,6 +201,7 @@ class QuickCapturePage(QWidget):
 
         self._add_lockable_row(form, "客户名称", "name", self.name_edit)
         self._add_lockable_row(form, "客户类型", "customer_type", self.type_combo)
+        self._add_lockable_row(form, "二级标签", "secondary_tags", self.secondary_tags_combo)
         self._add_lockable_row(form, "阶段", "stage", self.stage_combo)
         self._add_lockable_row(form, "业务方向", "business_direction", self.business_edit)
         self._add_lockable_row(form, "联系人", "contact", self.contact_edit)
@@ -153,6 +218,7 @@ class QuickCapturePage(QWidget):
         self._add_lockable_row(form, "当前需求", "current_need", self.need_edit)
         self._add_lockable_row(form, "最近推进", "recent_progress", self.progress_edit)
         self._add_lockable_row(form, "下次动作", "next_action", self.next_action_edit)
+        self._add_lockable_row(form, "下次跟进日期", "next_follow_up_date", self.next_follow_up_date_edit)
         self._add_lockable_row(form, "沟通日期", "communication_date", self.communication_date_edit)
         self._add_lockable_row(form, "沟通结论", "communication_summary", self.summary_edit)
         self._add_lockable_row(form, "新增信息", "communication_new_info", self.new_info_edit)
@@ -188,7 +254,7 @@ class QuickCapturePage(QWidget):
             ("适合粘贴什么", "客户名、聊天记录、需求描述、推进情况都可以；AI 只帮你整理，保存前仍由你确认。"),
             ("老客户更新", "从客户总览点 AI 更新此客户进入时，会锁定为当前客户，避免误建重复客户。"),
             ("保存前检查", "重点看客户名、类型、当前需求和下一步。确认过的字段可以点锁定，避免后续 AI 覆盖。"),
-            ("店群/KA 线索", "注意区分店群批量优惠、网店 KA 跟进、品牌合作三种推进逻辑。"),
+            ("身份线索", "客户类型可多选：博主和网店店群客户可以同时勾选；小时达、微信这类渠道写到二级标签。"),
         ):
             helper_item = QFrame()
             helper_item.setObjectName("SideItem")
@@ -226,6 +292,11 @@ class QuickCapturePage(QWidget):
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
 
+    def set_option_lists(self, customer_types: list[str] | tuple[str, ...], secondary_tags: list[str] | tuple[str, ...]) -> None:
+        self._customer_types = tuple(customer_types) or tuple(CUSTOMER_TYPES)
+        self.type_combo.set_options(self._customer_types)
+        self.secondary_tags_combo.set_options(tuple(secondary_tags) or tuple(SECONDARY_TAGS))
+
     def set_raw_text(self, text: str) -> None:
         self.raw_text_edit.setPlainText(text)
 
@@ -234,6 +305,8 @@ class QuickCapturePage(QWidget):
         self.clear_target_customer()
         self.raw_text_edit.clear()
         self.name_edit.clear()
+        self.type_combo.clear_selection()
+        self.secondary_tags_combo.clear_selection()
         self.business_edit.clear()
         self.contact_edit.clear()
         self.phone_edit.clear()
@@ -249,6 +322,7 @@ class QuickCapturePage(QWidget):
         self.need_edit.clear()
         self.progress_edit.clear()
         self.next_action_edit.clear()
+        self.next_follow_up_date_edit.clear()
         self.communication_date_edit.setText(date.today().isoformat())
         self.summary_edit.clear()
         self.new_info_edit.clear()
@@ -258,6 +332,7 @@ class QuickCapturePage(QWidget):
     def apply_draft(self, draft: CustomerDraft) -> None:
         self._set_line_value("name", self.name_edit, draft.name)
         self._set_combo_value("customer_type", self.type_combo, draft.customer_type)
+        self._set_combo_value("secondary_tags", self.secondary_tags_combo, draft.secondary_tags)
         self._set_combo_value("stage", self.stage_combo, draft.stage)
         self._set_line_value("business_direction", self.business_edit, draft.business_direction)
         self._set_line_value("contact", self.contact_edit, draft.contact)
@@ -274,6 +349,7 @@ class QuickCapturePage(QWidget):
         self._set_text_value("current_need", self.need_edit, draft.current_need)
         self._set_line_value("recent_progress", self.progress_edit, draft.recent_progress)
         self._set_line_value("next_action", self.next_action_edit, draft.next_action)
+        self._set_line_value("next_follow_up_date", self.next_follow_up_date_edit, draft.next_follow_up_date)
         if draft.communication:
             self._set_line_value("communication_date", self.communication_date_edit, draft.communication.entry_date)
             self._set_text_value("communication_summary", self.summary_edit, draft.communication.summary)
@@ -287,8 +363,9 @@ class QuickCapturePage(QWidget):
         self.apply_draft(
             CustomerDraft(
                 name=detail.name,
-                customer_type=detail.customer_type or CUSTOMER_TYPES[0],
+                customer_type=detail.customer_type or self._customer_types[0],
                 stage=detail.stage or CUSTOMER_STAGES[0],
+                secondary_tags=detail.secondary_tags,
                 business_direction=detail.business_direction,
                 contact=detail.contact,
                 phone=detail.phone,
@@ -304,6 +381,7 @@ class QuickCapturePage(QWidget):
                 current_need=detail.current_need,
                 recent_progress=detail.recent_progress,
                 next_action=detail.next_action,
+                next_follow_up_date=detail.next_follow_up_date,
                 communication=CommunicationEntry(entry_date=date.today().isoformat()),
             )
         )
@@ -316,8 +394,9 @@ class QuickCapturePage(QWidget):
         self.apply_draft(
             CustomerDraft(
                 name=detail.name,
-                customer_type=detail.customer_type or CUSTOMER_TYPES[0],
+                customer_type=detail.customer_type or self._customer_types[0],
                 stage=detail.stage or CUSTOMER_STAGES[0],
+                secondary_tags=detail.secondary_tags,
                 business_direction=detail.business_direction,
                 contact=detail.contact,
                 phone=detail.phone,
@@ -333,6 +412,7 @@ class QuickCapturePage(QWidget):
                 current_need=detail.current_need,
                 recent_progress=detail.recent_progress,
                 next_action=detail.next_action,
+                next_follow_up_date=detail.next_follow_up_date,
                 communication=CommunicationEntry(entry_date=date.today().isoformat()),
             )
         )
@@ -427,6 +507,7 @@ class QuickCapturePage(QWidget):
             customer_type=self.type_combo.currentText().strip(),
             stage=self.stage_combo.currentText().strip(),
             original_name=self.target_customer_name,
+            secondary_tags=self.secondary_tags_combo.currentText().strip(),
             business_direction=self.business_edit.text().strip(),
             contact=self.contact_edit.text().strip(),
             phone=self.phone_edit.text().strip(),
@@ -442,6 +523,7 @@ class QuickCapturePage(QWidget):
             current_need=self.need_edit.toPlainText().strip(),
             recent_progress=self.progress_edit.text().strip(),
             next_action=self.next_action_edit.text().strip(),
+            next_follow_up_date=self.next_follow_up_date_edit.text().strip(),
             communication=communication,
         )
         self.save_requested.emit(draft)

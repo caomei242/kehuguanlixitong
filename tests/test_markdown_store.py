@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 from strawberry_customer_management.markdown_store import MarkdownCustomerStore
-from strawberry_customer_management.models import ApprovalEntry, CommunicationEntry, CustomerDraft
+from strawberry_customer_management.models import ApprovalEntry, CommunicationEntry, CustomerDraft, CUSTOMER_STAGES, ProjectDraft, ProjectRecord
 
 
 def write_seed_vault(root):
@@ -104,6 +104,12 @@ def write_seed_vault(root):
     )
 
 
+def test_customer_archived_stage_and_project_follow_up_date_models_are_available():
+    assert "已归档" in CUSTOMER_STAGES
+    assert ProjectRecord("爱慕", "爱慕推广", "推进中", next_follow_up_date="2026-04-30").next_follow_up_date == "2026-04-30"
+    assert ProjectDraft("爱慕", "爱慕推广", "推进中", next_follow_up_date="2026-04-30").next_follow_up_date == "2026-04-30"
+
+
 def test_lists_customers_from_brand_and_shop_group_tables(tmp_path):
     write_seed_vault(tmp_path)
     store = MarkdownCustomerStore(tmp_path)
@@ -115,6 +121,39 @@ def test_lists_customers_from_brand_and_shop_group_tables(tmp_path):
     assert records[0].stage == "已合作"
     assert records[1].customer_type == "网店店群客户"
     assert records[1].shop_scale == "30家店"
+    assert records[0].next_follow_up_date == ""
+    assert records[1].next_follow_up_date == ""
+
+
+def test_focus_customers_excludes_archived_and_suspended(tmp_path):
+    write_seed_vault(tmp_path)
+    store = MarkdownCustomerStore(tmp_path)
+
+    store.upsert_customer(
+        CustomerDraft(
+            name="MW1",
+            customer_type="品牌客户",
+            stage="已归档",
+            business_direction="短视频拍摄",
+            current_need="去年项目已结束",
+            next_action="仅保留历史查询",
+            next_follow_up_date="已归档",
+            communication=CommunicationEntry(entry_date="2026-04-27", summary="确认收档"),
+        )
+    )
+    store.upsert_customer(
+        CustomerDraft(
+            name="暂缓客户",
+            customer_type="品牌客户",
+            stage="暂缓",
+            business_direction="品牌推广",
+            current_need="暂不推进",
+            next_action="后续有触发再看",
+            communication=CommunicationEntry(entry_date="2026-04-27", summary="转暂缓"),
+        )
+    )
+
+    assert [record.name for record in store.list_focus_customers()] == ["爱慕", "星河店群"]
 
 
 def test_reads_customer_detail_sections(tmp_path):
@@ -129,6 +168,7 @@ def test_reads_customer_detail_sections(tmp_path):
     assert detail.phone == "13800001111"
     assert detail.wechat_id == "amu_zhangsan"
     assert detail.current_need == "新业务待继续补需求"
+    assert detail.next_follow_up_date == ""
     assert detail.communication_entries[0].entry_date == "2026-04-16"
     assert detail.communication_entries[0].summary == "完成合同审批口径整理"
     assert detail.pending_approval_count == 1
@@ -208,6 +248,7 @@ def test_creates_shop_group_customer_and_updates_summary(tmp_path):
             current_need="想确认 50 家店批量购买是否有阶梯折扣",
             recent_progress="初次录入",
             next_action="确认采购软件、点数数量和期望折扣",
+            next_follow_up_date="2026-04-22",
             communication=CommunicationEntry(
                 entry_date="2026-04-20",
                 summary="客户有 50 家店，想问批量采购折扣",
@@ -225,8 +266,10 @@ def test_creates_shop_group_customer_and_updates_summary(tmp_path):
     assert "- 联系电话：13812345678" in detail_text
     assert "- 微信号：yunzhou_shop_01" in detail_text
     assert "- 关键数量/规模：50家店" in detail_text
+    assert "- 下次跟进日期：2026-04-22" in detail_text
     summary_text = (tmp_path / "00 客户总表.md").read_text(encoding="utf-8")
-    assert "| 云舟店群 | 潜客 | 集采点数 / 店铺软件批量采购 | 50家店 | 想确认 50 家店批量购买是否有阶梯折扣 | 初次录入 | 确认采购软件、点数数量和期望折扣 | 王五 | [[客户/客户--云舟店群]] | 2026-04-20 |" in summary_text
+    assert "| 客户 | 阶段 | 业务方向 | 店铺规模 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 主联系人 | 对应客户页 | 更新时间 |" in summary_text
+    assert "| 云舟店群 | 潜客 | 集采点数 / 店铺软件批量采购 | 50家店 | 想确认 50 家店批量购买是否有阶梯折扣 | 初次录入 | 确认采购软件、点数数量和期望折扣 | 2026-04-22 | 王五 | [[客户/客户--云舟店群]] | 2026-04-20 |" in summary_text
 
 
 def test_creates_shop_ka_customer_and_adds_missing_summary_section(tmp_path):
@@ -261,8 +304,45 @@ def test_creates_shop_ka_customer_and_adds_missing_summary_section(tmp_path):
     assert "- 合同/付款特征：已付费产品使用深化、功能跟进、增购/新功能转化" in detail_text
     summary_text = (tmp_path / "00 客户总表.md").read_text(encoding="utf-8")
     assert "## 网店KA客户总表" in summary_text
-    assert "| 客户 | 阶段 | 业务方向 | 店铺/产品状态 | 当前需求 | 最近推进 | 下次动作 | 主联系人 | 对应客户页 | 更新时间 |" in summary_text
-    assert "| 青竹画材官方旗舰店 | 已合作 | KA版 / AI裂变 / AI详情页 | 抖店 · 已订购 KA版 | 已使用 AI裂变，并对 AI详情页功能有明确兴趣 | 从临时店群分类修正为 KA 客户运营 | 跟进 AI详情页介绍、试用安排和增购可能 | 待补充 | [[客户/客户--青竹画材官方旗舰店]] | 2026-04-23 |" in summary_text
+    assert "| 客户 | 阶段 | 业务方向 | 店铺/产品状态 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 主联系人 | 对应客户页 | 更新时间 |" in summary_text
+    assert "| 青竹画材官方旗舰店 | 已合作 | KA版 / AI裂变 / AI详情页 | 抖店 · 已订购 KA版 | 已使用 AI裂变，并对 AI详情页功能有明确兴趣 | 从临时店群分类修正为 KA 客户运营 | 跟进 AI详情页介绍、试用安排和增购可能 |  | 待补充 | [[客户/客户--青竹画材官方旗舰店]] | 2026-04-23 |" in summary_text
+
+
+def test_creates_blogger_customer_and_adds_blogger_summary_section(tmp_path):
+    write_seed_vault(tmp_path)
+    store = MarkdownCustomerStore(tmp_path)
+
+    store.upsert_customer(
+        CustomerDraft(
+            name="那山那水那人",
+            customer_type="博主 / 网店店群客户",
+            stage="沟通中",
+            secondary_tags="小时达 / 微信 / AI商品图 / AI详情页",
+            business_direction="新功能推广 / AI商品图 / AI详情页",
+            contact="孙总",
+            shop_scale="博主推广者，同时也是小时达/微信场景使用者",
+            current_need="评估是否合作推广 AI 商品图/详情页新功能",
+            recent_progress="已发功能说明和示例图，博主表示这两天没在，回去后沟通",
+            next_action="等待孙总回去后确认推广合作意向和报价/排期",
+            communication=CommunicationEntry(
+                entry_date="2026-04-27",
+                summary="新增博主线索，那山那水那人可能合作推广新功能",
+                new_info="该对象既可能是推广者，也可能是小时达/微信场景使用者",
+                next_step="继续确认推广合作意向、报价和排期",
+            ),
+        )
+    )
+
+    detail_path = tmp_path / "客户" / "客户--那山那水那人.md"
+    assert detail_path.exists()
+    detail_text = detail_path.read_text(encoding="utf-8")
+    assert "- 客户类型：博主 / 网店店群客户" in detail_text
+    assert "- 二级标签：小时达 / 微信 / AI商品图 / AI详情页" in detail_text
+    assert "- 合同/付款特征：功能推广合作、内容排期、样稿/报价及使用者转化情况" in detail_text
+    summary_text = (tmp_path / "00 客户总表.md").read_text(encoding="utf-8")
+    assert "## 博主总表" in summary_text
+    assert "| 客户 | 阶段 | 业务方向 | 客户类型 | 二级标签 | 当前需求 | 最近推进 | 下次动作 | 下次跟进日期 | 主联系人 | 对应客户页 | 更新时间 |" in summary_text
+    assert "| 那山那水那人 | 沟通中 | 新功能推广 / AI商品图 / AI详情页 | 博主 / 网店店群客户 | 小时达 / 微信 / AI商品图 / AI详情页 | 评估是否合作推广 AI 商品图/详情页新功能 | 已发功能说明和示例图，博主表示这两天没在，回去后沟通 | 等待孙总回去后确认推广合作意向和报价/排期 |  | 孙总 | [[客户/客户--那山那水那人]] | 2026-04-27 |" in summary_text
 
 
 def test_updates_existing_customer_without_creating_duplicate_page(tmp_path):
@@ -343,4 +423,4 @@ def test_renames_existing_customer_without_leaving_duplicate_summary_row(tmp_pat
     assert "- 联系电话：13900001111" in renamed_text
     summary_text = (tmp_path / "00 客户总表.md").read_text(encoding="utf-8")
     assert "| 星河店群 |" not in summary_text
-    assert "| 星河抖店店群 | 沟通中 | 集采点数 / 店铺软件批量采购 | 30家店 | 继续确认批量折扣 | 客户名称已确认 | 按新名称继续报价 | 李四 | [[客户/客户--星河抖店店群]] | 2026-04-20 |" in summary_text
+    assert "| 星河抖店店群 | 沟通中 | 集采点数 / 店铺软件批量采购 | 30家店 | 继续确认批量折扣 | 客户名称已确认 | 按新名称继续报价 |  | 李四 | [[客户/客户--星河抖店店群]] | 2026-04-20 |" in summary_text

@@ -58,6 +58,7 @@ def test_minimax_extracts_customer_draft_from_json_response():
                     "当前需求": "想确认 50 家店批量购买店铺软件是否有阶梯折扣",
                     "最近推进": "客户询问批量折扣",
                     "下次动作": "确认采购软件、点数数量和期望折扣",
+                    "下次跟进日期": "明天",
                     "沟通日期": "2026-04-20",
                     "沟通结论": "店群客户有 50 家店，正在询价批量采购折扣",
                     "新增信息": "关注店铺软件和集采点数",
@@ -88,12 +89,16 @@ def test_minimax_extracts_customer_draft_from_json_response():
     assert draft.current_need == "想确认 50 家店批量购买店铺软件是否有阶梯折扣"
     assert draft.recent_progress == "客户询问批量折扣"
     assert draft.next_action == "确认采购软件、点数数量和期望折扣"
+    assert draft.next_follow_up_date == "2026-04-21"
     assert draft.communication is not None
     assert draft.communication.entry_date == "2026-04-20"
     assert draft.communication.summary == "店群客户有 50 家店，正在询价批量采购折扣"
     assert transport.requests[0]["url"] == "https://api.minimaxi.com/v1/chat/completions"
     assert transport.requests[0]["headers"]["Authorization"] == "Bearer test-key"
     assert transport.requests[0]["payload"]["model"] == "MiniMax-M2.7"
+    user_prompt = transport.requests[0]["payload"]["messages"][1]["content"]
+    assert "下次跟进日期" in user_prompt
+    assert "相对日期" in user_prompt
 
 
 def test_minimax_extracts_json_from_markdown_code_fence():
@@ -216,6 +221,44 @@ def test_minimax_falls_back_to_shop_ka_store_name_from_raw_text():
     assert draft.business_direction == "KA版 / AI裂变 / AI详情页"
     assert draft.shop_scale == "抖店 · 已订购 KA版"
     assert draft.current_need == "已使用 AI裂变，并对 AI详情页功能有明确兴趣"
+
+
+def test_minimax_recognizes_blogger_with_overlapping_user_identity():
+    transport = FakeMiniMaxTransport(
+        minimax_response(
+            json.dumps(
+                {
+                    "客户名称": "孙总",
+                    "客户类型": "博主 / 网店店群客户",
+                    "二级标签": "小时达 / 微信 / AI商品图 / AI详情页",
+                    "阶段": "沟通中",
+                    "业务方向": "新功能推广 / AI商品图 / AI详情页",
+                    "联系人": "孙总",
+                    "店铺规模": "博主推广者，同时也是小时达/微信场景使用者",
+                    "当前需求": "评估是否合作推广 AI 商品图/详情页新功能",
+                    "最近推进": "已发功能说明和示例图，博主表示这两天没在",
+                    "下次动作": "等待回去后确认推广合作意向和报价/排期",
+                    "沟通日期": "2026-04-27",
+                    "沟通结论": "该对象是博主推广线索，同时可能也是软件使用者",
+                },
+                ensure_ascii=False,
+            )
+        )
+    )
+    client = MiniMaxCaptureClient(api_key="test-key", transport=transport)
+
+    draft = client.extract_draft(
+        "孙总X稳定电商（小时达/微信）群里，@那山那水那人，想看是否合作推广 AI 商品图/详情页新功能。孙总说这两天没在，回去和你说。",
+        existing_customers=[],
+        today="2026-04-27",
+    )
+
+    assert draft.name == "那山那水那人"
+    assert draft.customer_type == "博主 / 网店店群客户"
+    assert draft.secondary_tags == "小时达 / 微信 / AI商品图 / AI详情页"
+    assert draft.business_direction == "新功能推广 / AI商品图 / AI详情页"
+    assert draft.shop_scale == "博主推广者，同时也是小时达/微信场景使用者"
+    assert draft.current_need == "评估是否合作推广 AI 商品图/详情页新功能"
 
 
 def test_minimax_requires_api_key_before_requesting():
