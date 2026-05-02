@@ -8,7 +8,21 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Protocol
 
-from strawberry_customer_management.models import CommunicationEntry, CustomerDraft, CUSTOMER_STAGES, CUSTOMER_TYPES, SECONDARY_TAGS
+from strawberry_customer_management.models import (
+    CaptureDraft,
+    CommunicationEntry,
+    CustomerDraft,
+    CUSTOMER_STAGES,
+    CUSTOMER_TYPES,
+    INTERNAL_MAIN_WORK_NAME,
+    INTERNAL_PROJECT_TYPES,
+    normalize_internal_project_name,
+    PROJECT_STAGES,
+    PROJECT_TYPES,
+    ProjectRole,
+    ProjectDraft,
+    SECONDARY_TAGS,
+)
 
 
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
@@ -75,10 +89,27 @@ class MiniMaxCaptureClient:
         today: str | None = None,
         target_customer_name: str | None = None,
     ) -> CustomerDraft:
+        capture = self.extract_capture(
+            raw_text=raw_text,
+            existing_customers=existing_customers,
+            today=today,
+            target_customer_name=target_customer_name,
+        )
+        if capture.customer_draft is not None:
+            return capture.customer_draft
+        raise AICaptureError(f"AI 识别为「{capture.kind}」，请用主业录入保存。")
+
+    def extract_capture(
+        self,
+        raw_text: str,
+        existing_customers: list[str],
+        today: str | None = None,
+        target_customer_name: str | None = None,
+    ) -> CaptureDraft:
         if not self.api_key:
             raise AICaptureError("请先在设置里填写 MiniMax API Key。")
         if not raw_text.strip():
-            raise AICaptureError("请先粘贴客户聊天或需求原文。")
+            raise AICaptureError("请先粘贴主业事项、客户聊天或需求原文。")
 
         payload = self._build_payload(
             raw_text=raw_text,
@@ -109,7 +140,7 @@ class MiniMaxCaptureClient:
             assert last_error is not None
             raise _decorate_minimax_error(last_error, attempted_base_urls) from last_error
         content = _extract_message_content(response)
-        return draft_from_ai_json(
+        draft = draft_from_ai_json(
             content,
             raw_text=raw_text,
             today=today or date.today().isoformat(),
@@ -117,6 +148,9 @@ class MiniMaxCaptureClient:
             customer_types=self.customer_types,
             secondary_tags=self.secondary_tags,
         )
+        if isinstance(draft, CaptureDraft):
+            return draft
+        return CaptureDraft(kind="客户更新", customer_draft=draft)
 
     def _build_payload(
         self,
@@ -130,14 +164,20 @@ class MiniMaxCaptureClient:
         customer_type_options = " / ".join(self.customer_types)
         secondary_tag_options = " / ".join(self.secondary_tags)
         system_prompt = (
-            "你是一个中文客户管理录入助手。你的任务是把用户粘贴的客户聊天、需求或推进情况，"
-            "整理成草莓客户管理系统的表单字段。只输出一个 JSON 对象，不要输出解释。"
+            "你是一个中文主业管理录入助手。你的任务是把用户粘贴的内部主业事项、客户聊天、"
+            "客户项目需求或推进情况，整理成草莓主业管理系统的表单字段。只输出一个 JSON 对象，不要输出解释。"
         )
         user_prompt = f"""今天日期：{today}
 已存在客户：{known_customers}
 {target_hint}
 
+先判断录入类型：
+- 录入类型只能是 客户更新 / 客户项目 / 主业事项。
+- 非客户事项不要创建伪客户；例如系统建设、内部流程、资料整理、运营安排，都归为 主业事项。
+- 主业事项固定关联对象为 {INTERNAL_MAIN_WORK_NAME}。
+
 字段要求：
+- 录入类型：必须返回。
 - 客户名称：必须尽量提取，老客户要使用已存在客户里的同名或最接近名称。
 - 如果提供了“当前正在更新的老客户”，客户名称必须严格返回这个名称，不要改写或加后缀。
 - 不要把联系人姓名、微信昵称或缩写昵称直接当成客户名称。品牌客户优先用品牌名；网店KA客户优先用具体店铺/账号名；网店店群客户优先用店群主体、店铺类型或业务标识命名；博主优先用博主昵称、账号名或沟通群里的对外称呼。
@@ -148,11 +188,16 @@ class MiniMaxCaptureClient:
 - 如果一个对象既是推广者又是软件使用者，不要二选一；客户类型直接多选，例如：博主 / 网店店群客户。小时达、微信这类渠道/场景只放二级标签。
 - 手机号、联系电话、微信号尽量提取；没有提到的信息输出空字符串。
 - 下次跟进日期：如有“明天、后天、下周一、3天后”等相对日期，必须结合今天日期转换成 YYYY-MM-DD 绝对日期；没有明确日期输出空字符串。
+- 如果是客户项目，返回 项目名称、项目类型、当前重点、下次动作、下次跟进日期；客户名称仍然是关联客户。
+- 如果是主业事项，返回 事项名称、项目类型、当前重点、下次动作、下次跟进日期。项目类型只能是 {' / '.join(INTERNAL_PROJECT_TYPES)}，阶段默认 推进中。
+- 如果原文出现人名、对接人、负责人、供应商、垫资商、法务、达人、客户联系人等项目关系人，必须返回 项目参与人。
+- 项目参与人只返回最小结构数组，每项包含 所属方、关系、人；例如 {{"所属方":"客户方","关系":"负责人","人":"张三"}}。
+- 所属方优先使用 我方 / 客户方 / 供应商 / 垫资方 / 达人博主 / 内部支持；关系保留原文角色，例如 对接人 / 负责人 / 供应商 / 垫资商 / 法务。
 - 没有提到的信息输出空字符串，不要编造。
 - 同一天多轮聊天要合并成一句有效结论。
 
 只返回这些键：
-客户名称、客户类型、二级标签、阶段、业务方向、联系人、手机号、微信号、所属主体、店铺规模、当前需求、最近推进、下次动作、下次跟进日期、沟通日期、沟通结论、新增信息、风险顾虑、下一步
+录入类型、客户名称、客户类型、二级标签、阶段、业务方向、联系人、手机号、微信号、所属主体、店铺规模、当前需求、最近推进、项目名称、事项名称、项目类型、当前重点、下次动作、下次跟进日期、项目参与人、沟通日期、沟通结论、新增信息、风险顾虑、下一步
 
 客户原文：
 {raw_text.strip()}"""
@@ -174,10 +219,21 @@ def draft_from_ai_json(
     target_customer_name: str | None = None,
     customer_types: list[str] | tuple[str, ...] | None = None,
     secondary_tags: list[str] | tuple[str, ...] | None = None,
-) -> CustomerDraft:
+) -> CustomerDraft | CaptureDraft:
     payload = _load_json_object(content)
     current_date = today or date.today().isoformat()
     forced_name = target_customer_name.strip() if target_customer_name else ""
+    capture_kind = _normalize_capture_kind(_value(payload, "录入类型"), forced_name)
+    if capture_kind == "主业事项":
+        return CaptureDraft(
+            kind="主业事项",
+            project_draft=_internal_project_draft_from_payload(payload, raw_text=raw_text, today=current_date),
+        )
+    if capture_kind == "客户项目":
+        return CaptureDraft(
+            kind="客户项目",
+            project_draft=_customer_project_draft_from_payload(payload, raw_text=raw_text, today=current_date, target_customer_name=forced_name),
+        )
     allowed_customer_types = tuple(customer_types or CUSTOMER_TYPES)
     allowed_secondary_tags = tuple(secondary_tags or SECONDARY_TAGS)
     customer_type = _multi_choice(_value(payload, "客户类型"), allowed_customer_types, _first_or_default(allowed_customer_types, "品牌客户"))
@@ -214,6 +270,141 @@ def draft_from_ai_json(
         next_follow_up_date=_normalize_follow_up_date(_value(payload, "下次跟进日期"), current_date),
         communication=communication,
     )
+
+
+def _normalize_capture_kind(value: str, forced_customer_name: str = "") -> str:
+    if forced_customer_name:
+        return "客户更新"
+    if value in {"客户更新", "客户项目", "主业事项"}:
+        return value
+    if "主业" in value or "内部" in value:
+        return "主业事项"
+    if "项目" in value:
+        return "客户项目"
+    return "客户更新"
+
+
+def _internal_project_draft_from_payload(payload: dict[str, Any], raw_text: str, today: str) -> ProjectDraft:
+    project_name = _value(payload, "事项名称") or _value(payload, "项目名称") or _infer_internal_project_name(raw_text)
+    return ProjectDraft(
+        brand_customer_name=INTERNAL_MAIN_WORK_NAME,
+        project_name=normalize_internal_project_name(project_name, today),
+        stage=_choice(_value(payload, "阶段"), PROJECT_STAGES, "推进中"),
+        project_type=_internal_project_type(_value(payload, "项目类型"), raw_text),
+        current_focus=_value(payload, "当前重点") or _value(payload, "当前需求") or raw_text.strip(),
+        next_action=_value(payload, "下次动作") or _value(payload, "下一步"),
+        next_follow_up_date=_normalize_follow_up_date(_value(payload, "下次跟进日期"), today),
+        participant_roles=_project_roles_from_payload(payload),
+        updated_at=today,
+    )
+
+
+def _customer_project_draft_from_payload(payload: dict[str, Any], raw_text: str, today: str, target_customer_name: str = "") -> ProjectDraft:
+    brand_customer_name = target_customer_name or _value(payload, "客户名称") or "待确认客户"
+    project_name = _value(payload, "项目名称") or _value(payload, "事项名称") or _infer_customer_project_name(raw_text, brand_customer_name)
+    return ProjectDraft(
+        brand_customer_name=brand_customer_name,
+        project_name=project_name,
+        stage=_choice(_value(payload, "阶段"), PROJECT_STAGES, "推进中"),
+        project_type=_choice(_value(payload, "项目类型"), PROJECT_TYPES, "其他项目"),
+        current_focus=_value(payload, "当前重点") or _value(payload, "当前需求") or raw_text.strip(),
+        next_action=_value(payload, "下次动作") or _value(payload, "下一步"),
+        next_follow_up_date=_normalize_follow_up_date(_value(payload, "下次跟进日期"), today),
+        participant_roles=_project_roles_from_payload(payload),
+        updated_at=today,
+    )
+
+
+def _project_roles_from_payload(payload: dict[str, Any]) -> list[ProjectRole]:
+    raw_roles = payload.get("项目参与人") or payload.get("参与人") or payload.get("项目关系人") or []
+    if isinstance(raw_roles, dict):
+        raw_items: list[Any] = [raw_roles]
+    elif isinstance(raw_roles, list):
+        raw_items = raw_roles
+    elif isinstance(raw_roles, str):
+        raw_items = _parse_project_role_text(raw_roles)
+    else:
+        raw_items = []
+
+    roles: list[ProjectRole] = []
+    seen: set[tuple[str, str, str]] = set()
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        name = _role_item_value(item, "人", "姓名", "name", "person")
+        relation = _role_item_value(item, "关系", "角色", "role", "relation")
+        side = _role_item_value(item, "所属方", "所属", "side")
+        if not name:
+            continue
+        key = (side, relation, name)
+        if key in seen:
+            continue
+        seen.add(key)
+        roles.append(ProjectRole(name=name, role=relation, side=side, relation=relation))
+    return roles
+
+
+def _role_item_value(item: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = item.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _parse_project_role_text(value: str) -> list[dict[str, str]]:
+    roles: list[dict[str, str]] = []
+    for part in re.split(r"\n|；|;", value):
+        text = part.strip(" -，,、")
+        if not text:
+            continue
+        chunks = [chunk.strip() for chunk in re.split(r"\s*[-/｜|：:]\s*", text) if chunk.strip()]
+        if len(chunks) >= 3:
+            roles.append({"所属方": chunks[0], "关系": chunks[1], "人": chunks[2]})
+        elif len(chunks) == 2:
+            roles.append({"关系": chunks[0], "人": chunks[1]})
+    return roles
+
+
+def _internal_project_type(value: str, raw_text: str) -> str:
+    if value in INTERNAL_PROJECT_TYPES:
+        return value
+    text = f"{value} {raw_text}"
+    if any(keyword in text for keyword in ("系统", "工具", "平台", "管理系统")):
+        return "主业系统建设"
+    if any(keyword in text for keyword in ("流程", "SOP", "规范", "优化")):
+        return "主业流程优化"
+    if any(keyword in text for keyword in ("资料", "文档", "整理", "归档")):
+        return "主业资料整理"
+    if any(keyword in text for keyword in ("运营", "跟进", "日常")):
+        return "主业运营事项"
+    return "其他主业事项"
+
+
+def _infer_internal_project_name(raw_text: str) -> str:
+    text = raw_text.strip()
+    for pattern in (
+        r"(?:做|建设|搭建|整理|优化|推进)(?:一个|一套|新的)?(?P<name>[^，。,；;]+)",
+        r"(?P<name>[^，。,；;]+?)(?:明天|后天|下周|继续|推进)",
+    ):
+        match = re.search(pattern, text)
+        if match:
+            name = match.group("name").strip(" ，。,；;")
+            if name:
+                return name
+    return text[:30] or "待确认主业事项"
+
+
+def _infer_customer_project_name(raw_text: str, brand_customer_name: str) -> str:
+    text = raw_text.strip()
+    if brand_customer_name and brand_customer_name in text:
+        without_customer = text.replace(brand_customer_name, "").strip(" ，。,；;")
+        if without_customer:
+            return without_customer[:40]
+    return text[:40] or "待确认客户项目"
 
 
 def _extract_message_content(response: dict[str, Any]) -> str:

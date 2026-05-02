@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 
@@ -12,6 +14,11 @@ QWidget {
 
 QMainWindow {
     background: #eff3f8;
+}
+
+QStackedWidget,
+QStackedWidget > QWidget {
+    background: #fbfcfe;
 }
 
 QFrame#WindowShell {
@@ -428,7 +435,7 @@ QLineEdit, QTextEdit, QComboBox {
 }
 
 QTextBrowser {
-    background: transparent;
+    background: #ffffff;
     border: none;
 }
 
@@ -436,8 +443,94 @@ QScrollArea, QAbstractScrollArea {
     background: transparent;
     border: none;
 }
+
+QScrollArea::viewport,
+QAbstractScrollArea::viewport,
+QListWidget::viewport,
+QTextEdit::viewport,
+QTextBrowser::viewport {
+    background: transparent;
+}
+
+QTabWidget::pane {
+    background: #ffffff;
+    border: 1px solid #e3ebf6;
+    border-radius: 14px;
+}
+
+QTabBar {
+    background: #fbfcfe;
+}
+
+QTabBar::tab {
+    background: #f3f7ff;
+    color: #53627d;
+    border: 1px solid #dce6f3;
+    border-bottom-color: #dce6f3;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    padding: 7px 12px;
+}
+
+QTabBar::tab:selected {
+    background: #ffffff;
+    color: #244ebd;
+    border-color: #cddcff;
+}
+
+QSplitter::handle {
+    background: #e9eff7;
+}
+
+QSplitter::handle:horizontal {
+    width: 6px;
+}
+
+QSplitter::handle:vertical {
+    height: 6px;
+}
+
+QToolTip {
+    background: #ffffff;
+    color: #20304a;
+    border: 1px solid #d8e2f1;
+    border-radius: 8px;
+    padding: 6px 8px;
+}
+
+QComboBox QAbstractItemView {
+    background: #ffffff;
+    color: #20304a;
+    border: 1px solid #d9e2f1;
+    selection-background-color: #eef4ff;
+    selection-color: #20304a;
+    outline: none;
+}
 """
 
 
+def build_light_palette() -> QPalette:
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("#eff3f8"))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("#20304a"))
+    palette.setColor(QPalette.ColorRole.Base, QColor("#ffffff"))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#f7f9fc"))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#ffffff"))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#20304a"))
+    palette.setColor(QPalette.ColorRole.Text, QColor("#20304a"))
+    palette.setColor(QPalette.ColorRole.Button, QColor("#f3f7ff"))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor("#20304a"))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor("#ffffff"))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor("#4a7cff"))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#8a97af"))
+    return palette
+
+
 def apply_theme(app: QApplication) -> None:
+    style_hints = app.styleHints()
+    set_color_scheme = getattr(style_hints, "setColorScheme", None)
+    if callable(set_color_scheme):
+        set_color_scheme(Qt.ColorScheme.Light)
+    app.setPalette(build_light_palette())
     app.setStyleSheet(APP_STYLESHEET)

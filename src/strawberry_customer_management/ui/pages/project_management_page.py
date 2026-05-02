@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
 
 from strawberry_customer_management.markdown_store import sort_approval_entries, sort_project_records, summarize_approval_entry
 from strawberry_customer_management.models import (
+    INTERNAL_MAIN_WORK_NAME,
+    INTERNAL_PROJECT_TYPES,
     PROJECT_STAGES,
     PROJECT_TYPES,
     ApprovalEntry,
@@ -41,6 +43,7 @@ from strawberry_customer_management.ui.widgets.screenshot_input_widget import Sc
 ALL_BRANDS_FILTER = "全部客户"
 ALL_YEARS_FILTER = "全部年份"
 ALL_STAGES_FILTER = "全部状态"
+ARCHIVED_PROJECT_STAGES = {"已归档"}
 
 
 def _next_follow_up_date(value: object) -> str:
@@ -52,8 +55,18 @@ def _with_next_follow_up_date(value, next_follow_up_date: str):
     return value
 
 
+def _sort_project_board_records(records: list[ProjectRecord], selected_stage: str = ALL_STAGES_FILTER) -> list[ProjectRecord]:
+    sorted_records = sort_project_records(records)
+    if selected_stage and selected_stage != ALL_STAGES_FILTER:
+        return sorted_records
+    active_records = [record for record in sorted_records if record.stage not in ARCHIVED_PROJECT_STAGES]
+    archived_records = [record for record in sorted_records if record.stage in ARCHIVED_PROJECT_STAGES]
+    return [*active_records, *archived_records]
+
+
 class ProjectManagementPage(QWidget):
     project_selected = Signal(str, str)
+    person_selected = Signal(str)
     sync_requested = Signal()
     save_requested = Signal(object)
     approval_import_preview_requested = Signal(str)
@@ -176,51 +189,9 @@ class ProjectManagementPage(QWidget):
         list_layout.addLayout(list_header)
         list_layout.addLayout(self.project_cards_layout)
 
-        detail_panel = QFrame()
-        detail_panel.setObjectName("WorkspacePanel")
-        detail_layout = QVBoxLayout(detail_panel)
-        detail_layout.setContentsMargins(16, 16, 16, 16)
-        detail_layout.setSpacing(10)
-        detail_header = QHBoxLayout()
-        detail_title = QLabel("项目详情")
-        detail_title.setObjectName("SectionTitle")
-        self.detail_meta_label = QLabel("先从左侧选一个项目。")
-        self.detail_meta_label.setObjectName("SectionHint")
-        self.detail_meta_label.setWordWrap(True)
-        self.detail_close_button = QPushButton("收起")
-        self.detail_close_button.setObjectName("SecondaryActionButton")
-        self.detail_close_button.clicked.connect(self._clear_current_project_selection)
-        detail_header.addWidget(detail_title)
-        detail_header.addStretch(1)
-        detail_header.addWidget(self.detail_close_button)
-        detail_layout.addLayout(detail_header)
-        detail_layout.addWidget(self.detail_meta_label)
-        self.detail_scroll_area = QScrollArea()
-        self.detail_scroll_area.setObjectName("PageScrollArea")
-        self.detail_scroll_area.setWidgetResizable(True)
-        self.detail_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.detail_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        self.detail_scroll_content = QWidget()
-        self.detail_scroll_layout = QVBoxLayout(self.detail_scroll_content)
-        self.detail_scroll_layout.setContentsMargins(0, 0, 0, 0)
-        self.detail_scroll_layout.setSpacing(12)
-        self.detail_scroll_area.setWidget(self.detail_scroll_content)
-        detail_layout.addWidget(self.detail_scroll_area, 1)
-
-        toolbox_panel = QFrame()
-        toolbox_panel.setObjectName("WorkspacePanel")
-        toolbox_layout = QVBoxLayout(toolbox_panel)
-        toolbox_layout.setContentsMargins(16, 16, 16, 16)
-        toolbox_layout.setSpacing(10)
-        toolbox_header = QHBoxLayout()
-        toolbox_title = QLabel("项目工具箱")
-        toolbox_title.setObjectName("SectionTitle")
         self.toolbox_toggle_button = QPushButton("展开审批导入")
         self.toolbox_toggle_button.setObjectName("SecondaryActionButton")
         self.toolbox_toggle_button.clicked.connect(self._toggle_toolbox)
-        toolbox_header.addWidget(toolbox_title)
-        toolbox_header.addStretch(1)
-        toolbox_header.addWidget(self.toolbox_toggle_button)
         self.toolbox_hint_label = QLabel("审批导入、OCR 和归属写入都收在这里。")
         self.toolbox_hint_label.setObjectName("SectionHint")
         self.toolbox_hint_label.setWordWrap(True)
@@ -241,25 +212,15 @@ class ProjectManagementPage(QWidget):
         toolbox_content_layout.addWidget(self.approval_import_text_edit)
         toolbox_content_layout.addWidget(self.approval_import_screenshot_widget)
         toolbox_content_layout.addWidget(self.approval_import_preview_label)
-        toolbox_layout.addLayout(toolbox_header)
-        toolbox_layout.addWidget(self.toolbox_hint_label)
-        toolbox_layout.addWidget(self.toolbox_content)
-
-        workspace_row = QHBoxLayout()
-        workspace_row.setSpacing(14)
-        workspace_row.addWidget(list_panel, 5)
-        side_column = QVBoxLayout()
-        side_column.setSpacing(14)
-        side_column.addWidget(detail_panel, 4)
-        side_column.addWidget(toolbox_panel, 2)
-        workspace_row.addLayout(side_column, 4)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("SectionHint")
+        self.approval_toolbox_panel = self._build_approval_toolbox_panel()
 
         root.addWidget(topbar)
         root.addWidget(banner)
-        root.addLayout(workspace_row, 1)
+        root.addWidget(list_panel, 1)
+        root.addWidget(self.approval_toolbox_panel)
         root.addWidget(self.status_label)
         root.addStretch(1)
         self._set_toolbox_collapsed(True)
@@ -276,9 +237,6 @@ class ProjectManagementPage(QWidget):
             self.brand_filter_combo.setCurrentText(selected_brand)
         if selected_project:
             self._current_project_key = selected_project
-        elif self._records and self._current_project_key is None:
-            first = self._records[0]
-            self._current_project_key = (first.brand_customer_name, first.project_name)
         self._refresh()
 
     def selected_brand(self) -> str:
@@ -301,15 +259,10 @@ class ProjectManagementPage(QWidget):
         if detail is None:
             self._active_widgets = {}
             self.status_label.setText("")
-            self.detail_meta_label.setText("先从左侧选一个项目。")
         else:
             self._current_project_key = (detail.brand_customer_name, detail.project_name)
             self.status_label.setText(f"当前项目：{detail.project_name} · {detail.path_status}")
-            self.detail_meta_label.setText(
-                f"{detail.brand_customer_name} · {detail.year or '待确认年份'} · {detail.project_type or '待补类型'}"
-            )
         self._refresh_project_cards(self._displayed_records)
-        self._refresh_detail_panel()
 
     def set_sync_busy(self, busy: bool) -> None:
         self.sync_button.setEnabled(not busy)
@@ -372,7 +325,7 @@ class ProjectManagementPage(QWidget):
         selected_stage = self.stage_filter_combo.currentText()
         if selected_stage and selected_stage != ALL_STAGES_FILTER:
             records = [record for record in records if record.stage == selected_stage]
-        records = sort_project_records(records)
+        records = _sort_project_board_records(records, selected_stage)
         self._displayed_records = records
         self.project_count_label.setText(f"当前 {len(records)} 个项目")
         self.meta_label.setText(
@@ -383,9 +336,6 @@ class ProjectManagementPage(QWidget):
         ):
             self._current_project_key = None
             self._current_detail = None
-        if self._current_project_key is None and records:
-            first = records[0]
-            self._current_project_key = (first.brand_customer_name, first.project_name)
         self._refresh_project_cards(records)
         if self._current_project_key:
             self.project_selected.emit(*self._current_project_key)
@@ -401,27 +351,6 @@ class ProjectManagementPage(QWidget):
         for record in records:
             self.project_cards_layout.addWidget(self._build_project_card(record))
         self.project_cards_layout.addStretch(1)
-
-    def _refresh_detail_panel(self) -> None:
-        _clear_layout(self.detail_scroll_layout)
-        self._active_widgets = {}
-        if self._current_project_key is None:
-            empty = QLabel("左侧选中一个项目后，这里会展开完整 Case 工作台。")
-            empty.setObjectName("EmptyState")
-            empty.setWordWrap(True)
-            self.detail_scroll_layout.addWidget(empty)
-            self.detail_close_button.setEnabled(False)
-            return
-        if self._current_detail is None:
-            loading = QLabel("项目详情加载中...")
-            loading.setObjectName("EmptyState")
-            loading.setWordWrap(True)
-            self.detail_scroll_layout.addWidget(loading)
-            self.detail_close_button.setEnabled(True)
-            return
-        self.detail_close_button.setEnabled(True)
-        self.detail_scroll_layout.addWidget(self._build_detail_drawer(self._current_detail))
-        self.detail_scroll_layout.addStretch(1)
 
     def _build_project_card(self, record: ProjectRecord) -> QFrame:
         selected = (record.brand_customer_name, record.project_name) == self._current_project_key
@@ -459,11 +388,10 @@ class ProjectManagementPage(QWidget):
         right_box.setSpacing(6)
         tag = QLabel(record.stage or "待确认")
         tag.setObjectName("BoardStageBadge")
-        toggle_button = QPushButton("当前项目" if selected else "查看项目")
+        toggle_button = QPushButton("收起详情" if selected else "查看项目")
         toggle_button.setObjectName("InlineActionButton")
-        toggle_button.setEnabled(not selected)
         toggle_button.clicked.connect(
-            lambda _checked=False, brand=record.brand_customer_name, project=record.project_name: self._select_project(brand, project)
+            lambda _checked=False, brand=record.brand_customer_name, project=record.project_name: self._toggle_project(brand, project)
         )
         right_box.addWidget(tag, 0, Qt.AlignmentFlag.AlignRight)
         right_box.addWidget(toggle_button, 0, Qt.AlignmentFlag.AlignRight)
@@ -496,9 +424,18 @@ class ProjectManagementPage(QWidget):
         footer = QHBoxLayout()
         footer.setSpacing(8)
         footer.addWidget(self._build_inline_pill(f"跟进：{_next_follow_up_date(detail if detail else record) or '待补日期'}"))
+        footer.addWidget(self._build_inline_pill(self._dida_diary_pill_text(detail if detail else record)))
         footer.addWidget(self._build_inline_pill(f"当前负责人：{self._primary_owner_text(detail, record.brand_customer_name)}"))
         footer.addStretch(1)
         shell_layout.addLayout(footer)
+
+        if selected:
+            if detail:
+                shell_layout.addWidget(self._build_detail_drawer(detail))
+            else:
+                loading_label = QLabel("项目详情加载中...")
+                loading_label.setObjectName("SectionHint")
+                shell_layout.addWidget(loading_label)
 
         return shell
 
@@ -750,7 +687,9 @@ class ProjectManagementPage(QWidget):
         save_button.clicked.connect(self._emit_save_requested)
         collapse_button = QPushButton("收起详情")
         collapse_button.setObjectName("SecondaryActionButton")
-        collapse_button.clicked.connect(self._clear_current_project_selection)
+        collapse_button.clicked.connect(
+            lambda _checked=False, brand=detail.brand_customer_name, project=detail.project_name: self._toggle_project(brand, project)
+        )
         bottom_hint = QLabel("")
         bottom_hint.setObjectName("SectionHint")
         action_row.addWidget(status_chip)
@@ -799,19 +738,15 @@ class ProjectManagementPage(QWidget):
 
         return section
 
-    def _select_project(self, brand_customer_name: str, project_name: str) -> None:
+    def _toggle_project(self, brand_customer_name: str, project_name: str) -> None:
+        if self._current_project_key == (brand_customer_name, project_name):
+            self._current_project_key = None
+            self._current_detail = None
+            self._refresh_project_cards(self._displayed_records)
+            return
         self._current_project_key = (brand_customer_name, project_name)
-        self._current_detail = None
         self._refresh_project_cards(self._displayed_records)
-        self._refresh_detail_panel()
         self.project_selected.emit(brand_customer_name, project_name)
-
-    def _clear_current_project_selection(self) -> None:
-        self._current_project_key = None
-        self._current_detail = None
-        self.detail_meta_label.setText("先从左侧选一个项目。")
-        self._refresh_project_cards(self._displayed_records)
-        self._refresh_detail_panel()
 
     def _emit_save_requested(self) -> None:
         if self._current_project_key is None or not self._active_widgets:
@@ -878,6 +813,23 @@ class ProjectManagementPage(QWidget):
             self._line_edit_text("next_follow_up_date_edit"),
         )
         self.save_requested.emit(draft)
+
+    def _build_approval_toolbox_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("BoardPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+        header = QHBoxLayout()
+        title = QLabel("审批导入工具")
+        title.setObjectName("BoardPanelTitle")
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(self.toolbox_toggle_button)
+        layout.addLayout(header)
+        layout.addWidget(self.toolbox_hint_label)
+        layout.addWidget(self.toolbox_content)
+        return panel
 
     def _toggle_toolbox(self) -> None:
         self._set_toolbox_collapsed(not self.toolbox_content.isVisible())
@@ -1079,6 +1031,7 @@ class ProjectManagementPage(QWidget):
         info_row.setSpacing(8)
         info_row.addWidget(self._build_inline_pill(f"最新审批：{self._latest_approval_summary(detail)}"))
         info_row.addWidget(self._build_inline_pill(f"下次跟进：{_next_follow_up_date(detail) or '待补'}"))
+        info_row.addWidget(self._build_inline_pill(self._dida_diary_pill_text(detail)))
         info_row.addStretch(1)
         layout.addLayout(info_row)
         return panel
@@ -1089,9 +1042,9 @@ class ProjectManagementPage(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
-        title = QLabel("参与角色")
+        title = QLabel("参与人")
         title.setObjectName("BoardPanelTitle")
-        subtitle = QLabel("把甲方、审批链路、内部推进和资料协同拆开，后面补信息时好落点。")
+        subtitle = QLabel("项目里只放所属方、关系和人名；人的细节沉淀到关系人库。")
         subtitle.setObjectName("BoardPanelSubtitle")
         subtitle.setWordWrap(True)
         layout.addWidget(title)
@@ -1099,20 +1052,21 @@ class ProjectManagementPage(QWidget):
         for role_title, role_name, role_note in self._role_rows(detail):
             item = QFrame()
             item.setObjectName("BoardRoleItem")
-            item_layout = QVBoxLayout(item)
+            item_layout = QHBoxLayout(item)
             item_layout.setContentsMargins(12, 12, 12, 12)
-            item_layout.setSpacing(4)
+            item_layout.setSpacing(8)
             role_type = QLabel(role_title)
             role_type.setObjectName("BoardRoleType")
-            role_name_label = QLabel(role_name)
-            role_name_label.setObjectName("BoardRoleName")
-            role_name_label.setWordWrap(True)
-            role_note_label = QLabel(role_note)
-            role_note_label.setObjectName("BoardBodyLabel")
-            role_note_label.setWordWrap(True)
+            role_name_label = QPushButton(role_name)
+            role_name_label.setObjectName("InlineActionButton")
+            role_name_label.clicked.connect(lambda _checked=False, name=role_name: self.person_selected.emit(name))
             item_layout.addWidget(role_type)
-            item_layout.addWidget(role_name_label)
-            item_layout.addWidget(role_note_label)
+            item_layout.addWidget(role_name_label, 1)
+            if role_note:
+                role_note_label = QLabel(role_note)
+                role_note_label.setObjectName("BoardMetaLabel")
+                role_note_label.setWordWrap(True)
+                item_layout.addWidget(role_note_label, 2)
             layout.addWidget(item)
         extra_role_note = self._first_meaningful_line(detail.participant_roles_markdown)
         if extra_role_note:
@@ -1308,28 +1262,11 @@ class ProjectManagementPage(QWidget):
         if structured_nodes:
             return structured_nodes
         approval_text = detail.latest_approval_status or ""
-        progress_text = " ".join([detail.current_focus, detail.next_action, detail.risk, approval_text])
-        if detail.stage == "已归档":
-            active_index = 5
-        elif detail.stage == "待确认":
-            active_index = 0
-        elif any(keyword in progress_text for keyword in ("审批", "合同", "盖章", "法务")):
-            active_index = 1
-        elif any(keyword in progress_text for keyword in ("样品", "素材", "资料", "寄送", "确认单")):
-            active_index = 2
-        elif any(keyword in progress_text for keyword in ("验收", "交付", "回执", "收货")):
-            active_index = 4
-        else:
-            active_index = 3
+        workflow_kind = self._workflow_kind_for_detail(detail)
+        progress_text = " ".join([detail.current_focus, detail.next_action, detail.risk, approval_text, detail.project_type])
+        active_index = self._active_workflow_index(workflow_kind, detail, progress_text)
 
-        steps = [
-            ("Case 建档", f"年份 {detail.year or '待确认'} · {(detail.path_status or '路径待确认')}"),
-            ("审批 / 合同", approval_text or "审批状态和合同进展待补"),
-            ("资料筹备", self._first_meaningful_line(detail.materials_markdown) or "素材、样品和确认单待补"),
-            ("执行推进", detail.current_focus or "当前推进事项待补"),
-            ("验收交付", detail.next_action or "交付和验收动作待补"),
-            ("归档沉淀", self._first_meaningful_line(detail.notes_markdown) or "项目沉淀和归档状态待补"),
-        ]
+        steps = self._workflow_steps_for_detail(workflow_kind, detail, approval_text)
 
         nodes: list[dict[str, str]] = []
         for index, (title, summary) in enumerate(steps):
@@ -1356,20 +1293,177 @@ class ProjectManagementPage(QWidget):
             )
         return nodes
 
+    def _workflow_kind_for_detail(self, detail: ProjectDetail) -> str:
+        project_type = detail.project_type or ""
+        text = " ".join([detail.brand_customer_name, detail.project_name, project_type])
+        if detail.brand_customer_name == INTERNAL_MAIN_WORK_NAME or project_type in INTERNAL_PROJECT_TYPES:
+            return "internal"
+        if "店群" in project_type or "店群" in text:
+            return "shop_group"
+        if "KA" in project_type or "KA" in text:
+            return "ka"
+        if "博主" in project_type or "达人" in project_type:
+            return "blogger"
+        if project_type == "合同项目" or "合同" in detail.project_name:
+            return "contract"
+        return "default"
+
+    def _active_workflow_index(self, workflow_kind: str, detail: ProjectDetail, progress_text: str) -> int:
+        if detail.stage == "已归档":
+            return 5
+        if detail.stage == "待确认":
+            return 0
+        if workflow_kind == "contract":
+            if any(keyword in progress_text for keyword in ("审批", "合同", "盖章", "法务")):
+                return 1
+            if any(keyword in progress_text for keyword in ("样品", "素材", "资料", "寄送", "确认单")):
+                return 2
+            if any(keyword in progress_text for keyword in ("验收", "交付", "回执", "收货")):
+                return 4
+            return 3
+        if workflow_kind == "internal":
+            if any(keyword in progress_text for keyword in ("方案", "边界", "确认", "梳理")):
+                return 1
+            if any(keyword in progress_text for keyword in ("测试", "验证", "验收", "bug", "Bug")):
+                return 3
+            if any(keyword in progress_text for keyword in ("复盘", "沉淀", "上线", "归档")):
+                return 4
+            return 2
+        if workflow_kind == "ka":
+            if any(keyword in progress_text for keyword in ("试用", "演示", "方案")):
+                return 1
+            if any(keyword in progress_text for keyword in ("配置", "开通", "账号", "权限")):
+                return 2
+            if any(keyword in progress_text for keyword in ("增购", "续费", "转化")):
+                return 4
+            return 3
+        if workflow_kind == "shop_group":
+            if any(keyword in progress_text for keyword in ("点数", "折扣", "报价", "方案")):
+                return 1
+            if any(keyword in progress_text for keyword in ("批量", "开通", "店铺")):
+                return 2
+            if any(keyword in progress_text for keyword in ("续费", "增购")):
+                return 4
+            return 3
+        if workflow_kind == "blogger":
+            if any(keyword in progress_text for keyword in ("报价", "坑位")):
+                return 1
+            if any(keyword in progress_text for keyword in ("排期", "脚本", "内容")):
+                return 2
+            if any(keyword in progress_text for keyword in ("发布", "反馈")):
+                return 3
+            if any(keyword in progress_text for keyword in ("结算", "复盘")):
+                return 4
+            return 2
+        if any(keyword in progress_text for keyword in ("验收", "交付", "反馈", "收货")):
+            return 4
+        if any(keyword in progress_text for keyword in ("样品", "素材", "资料", "寄送", "确认单")):
+            return 2
+        return 3
+
+    def _workflow_steps_for_detail(self, workflow_kind: str, detail: ProjectDetail, approval_text: str) -> list[tuple[str, str]]:
+        path_line = f"年份 {detail.year or '待确认'} · {(detail.path_status or '路径待确认')}"
+        materials_line = self._first_meaningful_line(detail.materials_markdown)
+        notes_line = self._first_meaningful_line(detail.notes_markdown)
+        current_line = self._first_meaningful_line(detail.current_focus) or "当前推进事项待补"
+        next_line = self._first_meaningful_line(detail.next_action) or "下一步动作待补"
+        if workflow_kind == "internal":
+            return [
+                ("事项建档", path_line),
+                ("方案确认", current_line),
+                ("执行推进", current_line),
+                ("测试验证", next_line),
+                ("复盘沉淀", notes_line or "阶段结论和可复用规则待沉淀"),
+                ("归档", notes_line or "收尾归档待确认"),
+            ]
+        if workflow_kind == "ka":
+            return [
+                ("需求确认", current_line),
+                ("方案试用", next_line),
+                ("配置开通", materials_line or detail.path_status or "账号、权限和配置待补"),
+                ("使用跟进", current_line),
+                ("增购转化", next_line),
+                ("归档", notes_line or "客户运营沉淀待补"),
+            ]
+        if workflow_kind == "shop_group":
+            return [
+                ("需求确认", current_line),
+                ("点数方案", next_line),
+                ("批量开通", materials_line or "店铺、账号和点数开通待补"),
+                ("使用反馈", current_line),
+                ("续费增购", next_line),
+                ("归档", notes_line or "店群客户沉淀待补"),
+            ]
+        if workflow_kind == "blogger":
+            return [
+                ("合作意向", current_line),
+                ("报价坑位", next_line),
+                ("内容排期", materials_line or "脚本、素材和发布时间待补"),
+                ("发布反馈", current_line),
+                ("结算复盘", notes_line or "效果、结算和复盘待补"),
+                ("归档", notes_line or "推广合作沉淀待补"),
+            ]
+        if workflow_kind == "contract":
+            return [
+                ("Case 建档", path_line),
+                ("审批合同", approval_text or "审批状态和合同进展待补"),
+                ("资料筹备", materials_line or "素材、样品和确认单待补"),
+                ("执行推进", current_line),
+                ("验收交付", next_line),
+                ("归档沉淀", notes_line or "项目沉淀和归档状态待补"),
+            ]
+        return [
+            ("项目建档", path_line),
+            ("需求确认", current_line),
+            ("资料筹备", materials_line or "资料和协作信息待补"),
+            ("执行推进", current_line),
+            ("交付反馈", next_line),
+            ("归档沉淀", notes_line or "项目沉淀和归档状态待补"),
+        ]
+
     def _role_rows(self, detail: ProjectDetail) -> list[tuple[str, str, str]]:
         if detail.participant_roles:
             rows: list[tuple[str, str, str]] = []
             for role in detail.participant_roles:
                 rows.append(
                     (
-                        role.role or "参与角色",
+                        " / ".join(part for part in (role.display_side, role.display_relation) if part) or "参与人",
                         role.name or "待补姓名",
-                        role.responsibility or role.note or "待补职责说明。",
+                        "",
                     )
                 )
             return rows
+        workflow_kind = self._workflow_kind_for_detail(detail)
         party = detail.party_a_info.resolved_with(detail.default_party_a_info)
         latest_entry = sort_approval_entries(detail.approval_entries)[0] if detail.approval_entries else None
+        if workflow_kind == "internal":
+            return [
+                ("内部负责人", detail.brand_customer_name if detail.brand_customer_name != INTERNAL_MAIN_WORK_NAME else "草莓", "主业事项默认先由自己推进。"),
+                ("协作人", "待补", "需要外部协作时再补人名。"),
+                ("当前推进", self._first_meaningful_line(detail.current_focus) or "待补推进重点", self._first_meaningful_line(detail.next_action) or "下一步待补。"),
+                ("资料沉淀", detail.path_status or "主业路径待确认", self._first_meaningful_line(detail.materials_markdown) or "资料入口待补。"),
+            ]
+        if workflow_kind in {"ka", "shop_group"}:
+            return [
+                ("客户对接", party.contact or detail.brand_customer_name, party.company or "客户联系人待补。"),
+                ("开通配置", self._first_meaningful_line(detail.materials_markdown) or "账号/软件配置待补", detail.path_status or "配置入口待补。"),
+                ("使用反馈", self._first_meaningful_line(detail.current_focus) or "使用反馈待补", self._first_meaningful_line(detail.next_action) or "下一步待补。"),
+                ("后续转化", self._first_meaningful_line(detail.next_action) or "续费/增购判断待补", "不默认走合同审批。"),
+            ]
+        if workflow_kind == "blogger":
+            return [
+                ("博主对接", party.contact or detail.brand_customer_name, party.company or "博主账号信息待补。"),
+                ("合作排期", self._first_meaningful_line(detail.next_action) or "内容排期待补", "坑位、报价和发布时间待确认。"),
+                ("内容反馈", self._first_meaningful_line(detail.current_focus) or "内容反馈待补", "发布效果和评论反馈待沉淀。"),
+                ("结算复盘", self._first_meaningful_line(detail.notes_markdown) or "结算复盘待补", "合作结束后再收档。"),
+            ]
+        if workflow_kind != "contract":
+            return [
+                ("项目对口", party.contact or detail.brand_customer_name, party.company or "对接人待补。"),
+                ("当前推进", self._first_meaningful_line(detail.current_focus) or "待补推进重点", self._first_meaningful_line(detail.next_action) or "下一步待补。"),
+                ("资料协同", detail.path_status or "主业路径待确认", self._first_meaningful_line(detail.materials_markdown) or "资料入口待补。"),
+                ("下次动作", getattr(detail, "next_follow_up_date", "") or "待排期", self._first_meaningful_line(detail.next_action) or "下一步待补。"),
+            ]
         return [
             (
                 "品牌对口",
@@ -1395,9 +1489,15 @@ class ProjectManagementPage(QWidget):
 
     def _role_summary_text(self, detail: ProjectDetail | None, brand_customer_name: str) -> str:
         if detail is None:
-            return f"{brand_customer_name} 对口、审批链路和内部推进待补齐。"
-        first_role = self._role_rows(detail)[0]
-        second_role = self._role_rows(detail)[1]
+            return f"{brand_customer_name} 对口和当前推进待补齐。"
+        role_rows = self._role_rows(detail)
+        if not role_rows:
+            return f"{brand_customer_name} 对口和当前推进待补齐。"
+        if len(role_rows) == 1:
+            first_role = role_rows[0]
+            return f"{first_role[0]}：{first_role[1]}。"
+        first_role = role_rows[0]
+        second_role = role_rows[1]
         return f"{first_role[0]}：{first_role[1]}；{second_role[0]}：{second_role[1]}。"
 
     def _primary_owner_text(self, detail: ProjectDetail | None, brand_customer_name: str) -> str:
@@ -1416,6 +1516,31 @@ class ProjectManagementPage(QWidget):
         if sorted_entries:
             return summarize_approval_entry(sorted_entries[0])
         return "暂无审批记录"
+
+    def _dida_diary_pill_text(self, project: ProjectRecord | ProjectDetail) -> str:
+        entries = list(getattr(project, "dida_diary_entries", []) or [])
+        if entries:
+            latest = sorted(entries, key=lambda entry: getattr(entry, "scheduled_at", "") or "", reverse=True)[0]
+            summary = " ".join(
+                part
+                for part in (
+                    getattr(latest, "scheduled_at", ""),
+                    getattr(latest, "title", "") or getattr(latest, "note", ""),
+                )
+                if part
+            ).strip()
+            return f"滴答：已关联 {summary}" if summary else "滴答：已关联"
+        status = str(getattr(project, "dida_diary_status", "") or "").strip()
+        latest_text = str(getattr(project, "latest_dida_diary", "") or "").strip()
+        if status == "已关联滴答":
+            return f"滴答：已关联 {latest_text}" if latest_text else "滴答：已关联"
+        if status == "待建滴答" or self._has_schedulable_follow_up(project):
+            return "滴答：待建"
+        return "滴答：无排期"
+
+    def _has_schedulable_follow_up(self, project: ProjectRecord | ProjectDetail) -> bool:
+        follow_up = _next_follow_up_date(project)
+        return bool(follow_up and follow_up not in {"待补日期", "待补", "待确认", "待排期", "已归档", "暂缓"})
 
     def _next_step_summary(self, detail: ProjectDetail | None, record: ProjectRecord) -> str:
         if detail is not None:
@@ -1502,14 +1627,18 @@ class ProjectManagementPage(QWidget):
         return bool(widget.isChecked()) if isinstance(widget, QCheckBox) else False
 
 
-def _clear_layout(layout) -> None:
+def _clear_layout(layout, preserve: tuple[QWidget, ...] = ()) -> None:
     while layout.count():
         item = layout.takeAt(0)
         child_layout = item.layout()
         if child_layout is not None:
-            _clear_layout(child_layout)
+            _clear_layout(child_layout, preserve)
         widget = item.widget()
         if widget is not None:
+            if widget in preserve:
+                widget.setParent(None)
+                continue
+            widget.setParent(None)
             widget.deleteLater()
 
 class ApprovalInboxDropZone(QFrame):

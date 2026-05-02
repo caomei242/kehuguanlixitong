@@ -20,7 +20,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from strawberry_customer_management.models import CommunicationEntry, CustomerDetail, CustomerDraft, CUSTOMER_STAGES, CUSTOMER_TYPES, SECONDARY_TAGS
+from strawberry_customer_management.models import (
+    CaptureDraft,
+    CommunicationEntry,
+    CustomerDetail,
+    CustomerDraft,
+    CUSTOMER_STAGES,
+    CUSTOMER_TYPES,
+    INTERNAL_MAIN_WORK_NAME,
+    normalize_internal_project_name,
+    PROJECT_STAGES,
+    PROJECT_TYPES,
+    ProjectDraft,
+    SECONDARY_TAGS,
+)
 from strawberry_customer_management.ui.widgets.screenshot_input_widget import ScreenshotInputWidget
 
 
@@ -37,20 +50,21 @@ class MultiSelectComboBox(QComboBox):
     def set_options(self, options: tuple[str, ...] | list[str]) -> None:
         current_selection = set(self.selected_values()) if self.count() else set()
         self.clear()
+        model = self.model()
         for option in options:
             self.addItem(option)
-            item = self.model().item(self.count() - 1)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            index = model.index(self.count() - 1, 0)
             state = Qt.CheckState.Checked if option in current_selection else Qt.CheckState.Unchecked
-            item.setData(state, Qt.ItemDataRole.CheckStateRole)
+            model.setData(index, state, Qt.ItemDataRole.CheckStateRole)
         self.lineEdit().setPlaceholderText(self._placeholder)
         self._refresh_text()
 
     def selected_values(self) -> list[str]:
         values: list[str] = []
+        model = self.model()
         for index in range(self.count()):
-            item = self.model().item(index)
-            if item.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked:
+            model_index = model.index(index, 0)
+            if model.data(model_index, Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked:
                 values.append(self.itemText(index))
         return values
 
@@ -59,20 +73,20 @@ class MultiSelectComboBox(QComboBox):
 
     def setCurrentText(self, text: str) -> None:  # type: ignore[override]
         selected = set(_split_multi_value(text))
+        model = self.model()
         for index in range(self.count()):
-            item = self.model().item(index)
             state = Qt.CheckState.Checked if self.itemText(index) in selected else Qt.CheckState.Unchecked
-            item.setData(state, Qt.ItemDataRole.CheckStateRole)
+            model.setData(model.index(index, 0), state, Qt.ItemDataRole.CheckStateRole)
         self._refresh_text()
 
     def clear_selection(self) -> None:
         self.setCurrentText("")
 
     def _toggle_index(self, index) -> None:
-        item = self.model().itemFromIndex(index)
-        current = item.data(Qt.ItemDataRole.CheckStateRole)
+        model = self.model()
+        current = model.data(index, Qt.ItemDataRole.CheckStateRole)
         next_state = Qt.CheckState.Unchecked if current == Qt.CheckState.Checked else Qt.CheckState.Checked
-        item.setData(next_state, Qt.ItemDataRole.CheckStateRole)
+        model.setData(index, next_state, Qt.ItemDataRole.CheckStateRole)
         self._refresh_text()
 
     def _refresh_text(self) -> None:
@@ -95,6 +109,9 @@ class QuickCapturePage(QWidget):
         self._locked_fields: set[str] = set()
         self.lock_buttons: dict[str, QPushButton] = {}
         self._customer_types = tuple(CUSTOMER_TYPES)
+        self._draft_mode = "customer"
+        self._project_brand_name = INTERNAL_MAIN_WORK_NAME
+        self._original_project_name = ""
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -113,7 +130,7 @@ class QuickCapturePage(QWidget):
 
         header = QLabel("快速录入")
         header.setObjectName("SectionTitle")
-        hint = QLabel("新客户和老客户更新都可以粘贴原文，AI 整理到表单后，你确认再保存。")
+        hint = QLabel("客户更新、客户项目和内部主业事项都可以粘贴原文，AI 整理到表单后，你确认再保存。")
         hint.setObjectName("SectionHint")
         self.target_context_label = QLabel("当前模式：通用录入")
         self.target_context_label.setObjectName("SectionHint")
@@ -128,16 +145,16 @@ class QuickCapturePage(QWidget):
         raw_header = QHBoxLayout()
         raw_title_box = QVBoxLayout()
         raw_title_box.setSpacing(4)
-        raw_label = QLabel("客户原文")
+        raw_label = QLabel("录入原文")
         raw_label.setObjectName("PanelTitle")
-        raw_hint = QLabel("可以直接粘贴客户名、聊天记录、需求描述或推进情况。")
+        raw_hint = QLabel("可以直接粘贴客户名、聊天记录、需求描述、项目推进或内部主业事项。")
         raw_hint.setObjectName("SectionHint")
         raw_title_box.addWidget(raw_label)
         raw_title_box.addWidget(raw_hint)
         raw_header.addLayout(raw_title_box, 1)
 
         self.raw_text_edit = QTextEdit()
-        self.raw_text_edit.setPlaceholderText("直接粘贴客户名、聊天记录、需求描述或推进情况，AI 会帮你整理成下面的字段。")
+        self.raw_text_edit.setPlaceholderText("直接粘贴客户名、聊天记录、需求描述、项目推进或内部主业事项，AI 会帮你整理成下面的字段。")
         self.raw_text_edit.setMinimumHeight(156)
         self.raw_text_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.screenshot_input_widget = ScreenshotInputWidget()
@@ -199,8 +216,8 @@ class QuickCapturePage(QWidget):
         self.next_step_edit = QTextEdit()
         self.next_step_edit.setFixedHeight(64)
 
-        self._add_lockable_row(form, "客户名称", "name", self.name_edit)
-        self._add_lockable_row(form, "客户类型", "customer_type", self.type_combo)
+        self._add_lockable_row(form, "对象/事项名称", "name", self.name_edit)
+        self._add_lockable_row(form, "类型", "customer_type", self.type_combo)
         self._add_lockable_row(form, "二级标签", "secondary_tags", self.secondary_tags_combo)
         self._add_lockable_row(form, "阶段", "stage", self.stage_combo)
         self._add_lockable_row(form, "业务方向", "business_direction", self.business_edit)
@@ -227,12 +244,12 @@ class QuickCapturePage(QWidget):
 
         actions = QHBoxLayout()
         actions.setSpacing(10)
-        save_button = QPushButton("保存并更新客户")
-        save_button.clicked.connect(self._emit_save_requested)
+        self.save_button = QPushButton("保存录入")
+        self.save_button.clicked.connect(self._emit_save_requested)
         clear_button = QPushButton("清空")
         clear_button.setObjectName("SecondaryActionButton")
         clear_button.clicked.connect(self.clear_form)
-        actions.addWidget(save_button)
+        actions.addWidget(self.save_button)
         actions.addWidget(clear_button)
         actions.addStretch(1)
 
@@ -251,9 +268,10 @@ class QuickCapturePage(QWidget):
         helper_title.setObjectName("SectionTitle")
         helper_layout.addWidget(helper_title)
         for title, body in (
-            ("适合粘贴什么", "客户名、聊天记录、需求描述、推进情况都可以；AI 只帮你整理，保存前仍由你确认。"),
+            ("适合粘贴什么", "客户名、聊天记录、需求描述、项目推进、内部系统或流程事项都可以；AI 只帮你整理，保存前仍由你确认。"),
             ("老客户更新", "从客户总览点 AI 更新此客户进入时，会锁定为当前客户，避免误建重复客户。"),
-            ("保存前检查", "重点看客户名、类型、当前需求和下一步。确认过的字段可以点锁定，避免后续 AI 覆盖。"),
+            ("主业事项", f"非客户事项会固定落到「{INTERNAL_MAIN_WORK_NAME}」下面，不需要创建伪客户。"),
+            ("保存前检查", "重点看对象/事项名称、类型、当前需求/重点和下一步。确认过的字段可以点锁定，避免后续 AI 覆盖。"),
             ("身份线索", "客户类型可多选：博主和网店店群客户可以同时勾选；小时达、微信这类渠道写到二级标签。"),
         ):
             helper_item = QFrame()
@@ -294,7 +312,8 @@ class QuickCapturePage(QWidget):
 
     def set_option_lists(self, customer_types: list[str] | tuple[str, ...], secondary_tags: list[str] | tuple[str, ...]) -> None:
         self._customer_types = tuple(customer_types) or tuple(CUSTOMER_TYPES)
-        self.type_combo.set_options(self._customer_types)
+        if self._draft_mode == "customer":
+            self.type_combo.set_options(self._customer_types)
         self.secondary_tags_combo.set_options(tuple(secondary_tags) or tuple(SECONDARY_TAGS))
 
     def set_raw_text(self, text: str) -> None:
@@ -303,6 +322,7 @@ class QuickCapturePage(QWidget):
     def clear_form(self) -> None:
         self.clear_field_locks()
         self.clear_target_customer()
+        self._set_customer_mode()
         self.raw_text_edit.clear()
         self.name_edit.clear()
         self.type_combo.clear_selection()
@@ -329,7 +349,17 @@ class QuickCapturePage(QWidget):
         self.risk_edit.clear()
         self.next_step_edit.clear()
 
-    def apply_draft(self, draft: CustomerDraft) -> None:
+    def apply_draft(self, draft: CustomerDraft | ProjectDraft | CaptureDraft) -> None:
+        if isinstance(draft, CaptureDraft):
+            if draft.project_draft is not None:
+                self.apply_draft(draft.project_draft)
+            elif draft.customer_draft is not None:
+                self.apply_draft(draft.customer_draft)
+            return
+        if isinstance(draft, ProjectDraft):
+            self._apply_project_draft(draft)
+            return
+        self._set_customer_mode()
         self._set_line_value("name", self.name_edit, draft.name)
         self._set_combo_value("customer_type", self.type_combo, draft.customer_type)
         self._set_combo_value("secondary_tags", self.secondary_tags_combo, draft.secondary_tags)
@@ -431,7 +461,7 @@ class QuickCapturePage(QWidget):
     def clear_target_customer(self) -> None:
         self.target_customer_name = ""
         self.target_context_label.setText("当前模式：通用录入")
-        self.raw_text_edit.setPlaceholderText("直接粘贴客户名、聊天记录、需求描述或推进情况，AI 会帮你整理成下面的字段。")
+        self.raw_text_edit.setPlaceholderText("直接粘贴客户名、聊天记录、需求描述、项目推进或内部主业事项，AI 会帮你整理成下面的字段。")
         self.name_edit.setReadOnly(False)
 
     def set_ai_busy(self, busy: bool) -> None:
@@ -495,6 +525,28 @@ class QuickCapturePage(QWidget):
         self.screenshot_ocr_requested.emit(image_bytes, source_label, self.target_customer_name)
 
     def _emit_save_requested(self) -> None:
+        if self._draft_mode == "project":
+            project_name = self.name_edit.text().strip()
+            if (self._project_brand_name or INTERNAL_MAIN_WORK_NAME) == INTERNAL_MAIN_WORK_NAME:
+                project_name = normalize_internal_project_name(
+                    project_name,
+                    self.communication_date_edit.text().strip() or date.today().isoformat(),
+                )
+            draft = ProjectDraft(
+                brand_customer_name=self._project_brand_name or INTERNAL_MAIN_WORK_NAME,
+                project_name=project_name,
+                stage=self.stage_combo.currentText().strip() or "推进中",
+                original_project_name=self._original_project_name,
+                project_type=self.type_combo.currentText().strip(),
+                current_focus=self.need_edit.toPlainText().strip() or self.summary_edit.toPlainText().strip(),
+                next_action=self.next_action_edit.text().strip() or self.next_step_edit.toPlainText().strip(),
+                next_follow_up_date=self.next_follow_up_date_edit.text().strip(),
+                risk=self.risk_edit.toPlainText().strip(),
+                notes_markdown=self.new_info_edit.toPlainText().strip(),
+                updated_at=self.communication_date_edit.text().strip() or date.today().isoformat(),
+            )
+            self.save_requested.emit(draft)
+            return
         communication = CommunicationEntry(
             entry_date=self.communication_date_edit.text().strip() or date.today().isoformat(),
             summary=self.summary_edit.toPlainText().strip(),
@@ -527,3 +579,38 @@ class QuickCapturePage(QWidget):
             communication=communication,
         )
         self.save_requested.emit(draft)
+
+    def _set_customer_mode(self) -> None:
+        self._draft_mode = "customer"
+        self._project_brand_name = INTERNAL_MAIN_WORK_NAME
+        self._original_project_name = ""
+        self.type_combo.set_options(self._customer_types)
+        self.stage_combo.blockSignals(True)
+        self.stage_combo.clear()
+        self.stage_combo.addItems(CUSTOMER_STAGES)
+        self.stage_combo.blockSignals(False)
+        self.save_button.setText("保存录入")
+
+    def _set_project_mode(self, brand_customer_name: str, original_project_name: str = "") -> None:
+        self._draft_mode = "project"
+        self._project_brand_name = brand_customer_name.strip() or INTERNAL_MAIN_WORK_NAME
+        self._original_project_name = original_project_name.strip()
+        self.type_combo.set_options(PROJECT_TYPES)
+        self.secondary_tags_combo.clear_selection()
+        self.stage_combo.blockSignals(True)
+        self.stage_combo.clear()
+        self.stage_combo.addItems(PROJECT_STAGES)
+        self.stage_combo.blockSignals(False)
+        self.target_context_label.setText(f"当前模式：项目/事项「{self._project_brand_name}」")
+        self.save_button.setText("保存项目/事项")
+
+    def _apply_project_draft(self, draft: ProjectDraft) -> None:
+        self._set_project_mode(draft.brand_customer_name, draft.original_project_name)
+        self._set_line_value("name", self.name_edit, draft.project_name)
+        self._set_combo_value("customer_type", self.type_combo, draft.project_type)
+        self._set_combo_value("stage", self.stage_combo, draft.stage or "推进中")
+        self._set_text_value("current_need", self.need_edit, draft.current_focus)
+        self._set_line_value("next_action", self.next_action_edit, draft.next_action)
+        self._set_line_value("next_follow_up_date", self.next_follow_up_date_edit, draft.next_follow_up_date)
+        self._set_text_value("communication_risk", self.risk_edit, draft.risk)
+        self._set_line_value("communication_date", self.communication_date_edit, draft.updated_at or date.today().isoformat())

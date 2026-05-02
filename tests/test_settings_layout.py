@@ -52,6 +52,7 @@ def test_settings_fields_expand_inside_their_cards() -> None:
     ai_fields = ai_panel.findChildren(QLineEdit)
     assert page.customer_root_edit in path_fields
     assert page.project_root_edit in path_fields
+    assert page.person_root_edit in path_fields
     assert page.main_work_root_edit in path_fields
     assert page.approval_inbox_root_edit in path_fields
     assert page.minimax_api_key_edit not in path_fields
@@ -72,6 +73,7 @@ def test_settings_save_payload_stays_compatible() -> None:
     page.set_values(
         customer_root=" /customers ",
         project_root="/projects",
+        person_root="/people",
         main_work_root="/main-work",
         approval_inbox_root="/inbox",
         minimax_api_key=" sk-cp-test ",
@@ -89,6 +91,7 @@ def test_settings_save_payload_stays_compatible() -> None:
         {
             "customer_root": "/customers",
             "project_root": "/projects",
+            "person_root": "/people",
             "main_work_root": "/main-work",
             "approval_inbox_root": "/inbox",
             "ai_provider": "minimax",

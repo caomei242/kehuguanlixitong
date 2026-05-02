@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from html import escape
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import QUrl, Signal, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from strawberry_customer_management.models import CUSTOMER_STAGES, CUSTOMER_TYPES, CustomerDetail, CustomerRecord
+from strawberry_customer_management.models import CUSTOMER_STAGES, CUSTOMER_TYPES, CustomerDetail, CustomerRecord, PersonRecord
 
 
 ALL_FILTER = "全部"
@@ -26,6 +26,7 @@ ALL_FILTER = "全部"
 
 class CustomerLibraryPage(QWidget):
     customer_selected = Signal(str)
+    person_selected = Signal(str)
     update_customer_requested = Signal(str)
     edit_customer_requested = Signal(str)
     archive_customer_requested = Signal(str)
@@ -305,6 +306,14 @@ class CustomerLibraryPage(QWidget):
         self.party_email_value = self._build_archive_field(self.party_card[1], "电子邮箱")
         self.party_address_value = self._build_archive_field(self.party_card[1], "通讯地址")
 
+        self.people_card = self._build_archive_section_card("关系人")
+        self.people_browser = QTextBrowser()
+        self.people_browser.setOpenExternalLinks(False)
+        self.people_browser.anchorClicked.connect(self._emit_person_link)
+        self.people_browser.setMinimumHeight(90)
+        self.people_browser.setMaximumHeight(150)
+        self.people_card[1].addWidget(self.people_browser)
+
         self.communication_card = self._build_archive_section_card("最近沟通")
         self.detail_browser = QTextBrowser()
         self.detail_browser.setOpenExternalLinks(False)
@@ -321,6 +330,7 @@ class CustomerLibraryPage(QWidget):
         section_grid.addWidget(self.judgement_card[0], 0, 1)
         section_grid.addWidget(self.party_card[0], 1, 0)
         section_grid.addWidget(self.communication_card[0], 1, 1)
+        section_grid.addWidget(self.people_card[0], 2, 0, 1, 2)
         section_grid.setColumnStretch(0, 1)
         section_grid.setColumnStretch(1, 1)
         detail_layout.addWidget(detail_tag, 0, Qt.AlignmentFlag.AlignLeft)
@@ -442,6 +452,7 @@ class CustomerLibraryPage(QWidget):
                 party_address="待补充",
             )
             self.detail_browser.setHtml("")
+            self.set_related_people([])
             return
 
         self._current_customer_name = detail.name
@@ -513,6 +524,39 @@ class CustomerLibraryPage(QWidget):
             </div>
             """
         )
+
+    def set_related_people(self, people: list[PersonRecord]) -> None:
+        if not people:
+            self.people_browser.setHtml(
+                "<div style=\"font-family:'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif; color:#73819d;\">暂无关系人。</div>"
+            )
+            return
+        grouped: dict[str, list[PersonRecord]] = {}
+        for person in people:
+            grouped.setdefault(person.side or "待补所属方", []).append(person)
+        blocks: list[str] = []
+        for side, persons in grouped.items():
+            items = "；".join(
+                f"<a href='person:{escape(person.name)}' style='color:#4a7cff; text-decoration:none; font-weight:800;'>"
+                f"{escape(person.name)}</a>：{escape(person.common_relation or person.organization or '待补关系')}"
+                for person in persons
+            )
+            blocks.append(
+                f"<div style='margin-bottom:8px;'><span style='color:#6b7892;font-weight:800;'>{escape(side)}</span>　{items}</div>"
+            )
+        self.people_browser.setHtml(
+            "<div style=\"font-family:'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif; color:#20304a; line-height:1.65;\">"
+            + "".join(blocks)
+            + "</div>"
+        )
+
+    def _emit_person_link(self, url: QUrl) -> None:
+        value = url.toString()
+        if not value.startswith("person:"):
+            return
+        name = value.removeprefix("person:").strip()
+        if name:
+            self.person_selected.emit(name)
 
     def _refresh(self) -> None:
         records = list(self._records)

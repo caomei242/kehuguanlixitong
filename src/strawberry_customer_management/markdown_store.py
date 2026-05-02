@@ -577,6 +577,9 @@ class MarkdownCustomerStore:
 - 预算/报价线索：待补充
 - 限制条件：待补充
 
+## 关系人
+- 暂无关系人
+
 ## 沟通沉淀
 
 ## 待归属审批
@@ -639,6 +642,7 @@ class MarkdownCustomerStore:
             ),
         )
         text = _ensure_section(text, "待归属审批", "- 暂无待归属审批")
+        text = _ensure_section(text, "关系人", "- 暂无关系人")
         return text
 
     def append_pending_approval(self, customer_name: str, entry: ApprovalEntry) -> CustomerDetail:

@@ -3,10 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+import re
 
 
 CUSTOMER_TYPES = ("品牌客户", "网店KA客户", "网店店群客户", "博主")
 PROJECT_CUSTOMER_TYPES = ("品牌客户", "网店KA客户", "博主")
+INTERNAL_MAIN_WORK_NAME = "草莓主业"
+INTERNAL_PROJECT_TYPES = (
+    "主业系统建设",
+    "主业流程优化",
+    "主业资料整理",
+    "主业运营事项",
+    "其他主业事项",
+)
 SECONDARY_TAGS = (
     "小时达",
     "微信",
@@ -21,6 +30,8 @@ SECONDARY_TAGS = (
     "内容种草",
     "集采点数",
 )
+PERSON_GENDERS = ("男", "女", "待判断", "不适用")
+PERSON_SIDES = ("客户方", "我方", "内部支持", "外部协作", "供应商", "垫资方", "达人博主")
 CUSTOMER_STAGES = ("潜客", "沟通中", "已合作", "暂缓", "已归档")
 PROJECT_STAGES = ("待确认", "推进中", "已归档", "暂缓")
 PROJECT_TYPES = (
@@ -30,11 +41,30 @@ PROJECT_TYPES = (
     "图文项目",
     "小红书项目",
     "KA客户运营",
+    "店群客户运营",
     "博主推广",
     "品牌资料",
     "授权资料",
     "其他项目",
+    *INTERNAL_PROJECT_TYPES,
 )
+
+
+def has_year_month_prefix(value: str) -> bool:
+    return bool(re.match(r"^20\d{2}-\d{2}\s+", value.strip()))
+
+
+def normalize_internal_project_name(project_name: str, reference_date: str = "") -> str:
+    normalized = project_name.strip()
+    if not normalized or has_year_month_prefix(normalized):
+        return normalized
+    iso_match = re.search(r"(20\d{2})-(\d{2})-\d{2}", reference_date)
+    if iso_match:
+        return f"{iso_match.group(1)}-{iso_match.group(2)} {normalized}"
+    year_month_match = re.search(r"(20\d{2})-(\d{2})", reference_date)
+    if year_month_match:
+        return f"{year_month_match.group(1)}-{year_month_match.group(2)} {normalized}"
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -99,6 +129,100 @@ class ProjectRole:
     role: str = ""
     responsibility: str = ""
     note: str = ""
+    side: str = ""
+    relation: str = ""
+    person_link: str = ""
+
+    @property
+    def display_side(self) -> str:
+        return self.side or _infer_person_side(self.role)
+
+    @property
+    def display_relation(self) -> str:
+        return self.relation or self.role
+
+
+def _infer_person_side(value: str) -> str:
+    normalized = value.strip()
+    if any(keyword in normalized for keyword in ("甲方", "品牌", "客户")):
+        return "客户方"
+    if any(keyword in normalized for keyword in ("供应商", "商家")):
+        return "供应商"
+    if any(keyword in normalized for keyword in ("实施商", "执行", "拍摄执行")):
+        return "外部协作"
+    if any(keyword in normalized for keyword in ("垫资", "垫付")):
+        return "垫资方"
+    if any(keyword in normalized for keyword in ("达人", "博主", "KOL")):
+        return "达人博主"
+    if any(keyword in normalized for keyword in ("法务", "内部", "Owner", "负责人", "运营")):
+        return "内部支持"
+    return ""
+
+
+@dataclass(frozen=True)
+class PersonProjectLink:
+    customer_name: str = ""
+    project_name: str = ""
+    side: str = ""
+    relation: str = ""
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class PersonRecord:
+    name: str
+    gender: str = "待判断"
+    side: str = ""
+    organization: str = ""
+    brand: str = ""
+    common_relation: str = ""
+    linked_customers: list[str] = field(default_factory=list)
+    linked_projects: list[str] = field(default_factory=list)
+    page_link: str = ""
+    updated_at: str = ""
+    page_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class PersonDetail(PersonRecord):
+    contact: str = ""
+    phone: str = ""
+    wechat_id: str = ""
+    judgement: str = ""
+    influence: str = ""
+    suitable_for: str = ""
+    not_suitable_for: str = ""
+    likes: str = ""
+    dislikes: str = ""
+    project_links: list[PersonProjectLink] = field(default_factory=list)
+    relation_notes: str = ""
+    raw_text: str = ""
+
+
+@dataclass(frozen=True)
+class PersonDraft:
+    name: str
+    gender: str = "待判断"
+    side: str = ""
+    organization: str = ""
+    brand: str = ""
+    common_relation: str = ""
+    contact: str = ""
+    phone: str = ""
+    wechat_id: str = ""
+    linked_customers: list[str] = field(default_factory=list)
+    project_links: list[PersonProjectLink] = field(default_factory=list)
+    judgement: str = ""
+    influence: str = ""
+    suitable_for: str = ""
+    not_suitable_for: str = ""
+    likes: str = ""
+    dislikes: str = ""
+    relation_notes: str = ""
+    updated_at: str | None = None
+
+    def resolved_updated_at(self) -> str:
+        return self.updated_at or date.today().isoformat()
 
 
 @dataclass(frozen=True)
@@ -112,6 +236,16 @@ class ProjectProgressNode:
     risk: str = ""
     note: str = ""
     next_action: str = ""
+
+
+@dataclass(frozen=True)
+class DidaDiaryEntry:
+    scheduled_at: str
+    status: str = ""
+    title: str = ""
+    parent: str = ""
+    source: str = "滴答日记"
+    note: str = ""
 
 
 @dataclass(frozen=True)
@@ -238,6 +372,8 @@ class ProjectRecord:
     page_path: Path | None = None
     path_status: str = ""
     latest_approval_status: str = ""
+    dida_diary_status: str = ""
+    latest_dida_diary: str = ""
 
 
 @dataclass(frozen=True)
@@ -251,6 +387,8 @@ class ProjectDetail(ProjectRecord):
     participant_roles_markdown: str = ""
     progress_nodes: list[ProjectProgressNode] = field(default_factory=list)
     progress_markdown: str = ""
+    dida_diary_entries: list[DidaDiaryEntry] = field(default_factory=list)
+    dida_diary_markdown: str = ""
     materials_markdown: str = ""
     notes_markdown: str = ""
     approval_entries: list[ApprovalEntry] = field(default_factory=list)
@@ -280,6 +418,8 @@ class ProjectDraft:
     participant_roles_markdown: str = ""
     progress_nodes: list[ProjectProgressNode] = field(default_factory=list)
     progress_markdown: str = ""
+    dida_diary_entries: list[DidaDiaryEntry] = field(default_factory=list)
+    dida_diary_markdown: str = ""
     materials_markdown: str = ""
     notes_markdown: str = ""
     approval_entries: list[ApprovalEntry] = field(default_factory=list)
@@ -294,3 +434,10 @@ class ProjectDraft:
         if self.override_party_a:
             return self.party_a_info.resolved_with(self.default_party_a_info)
         return self.default_party_a_info
+
+
+@dataclass(frozen=True)
+class CaptureDraft:
+    kind: str
+    customer_draft: CustomerDraft | None = None
+    project_draft: ProjectDraft | None = None

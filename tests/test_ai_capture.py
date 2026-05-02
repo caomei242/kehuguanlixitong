@@ -10,6 +10,7 @@ from strawberry_customer_management.ai_capture import (
     MINIMAX_GLOBAL_BASE_URL,
     MiniMaxCaptureClient,
 )
+from strawberry_customer_management.models import CaptureDraft, INTERNAL_MAIN_WORK_NAME, ProjectDraft
 
 
 class FakeMiniMaxTransport:
@@ -99,6 +100,94 @@ def test_minimax_extracts_customer_draft_from_json_response():
     user_prompt = transport.requests[0]["payload"]["messages"][1]["content"]
     assert "下次跟进日期" in user_prompt
     assert "相对日期" in user_prompt
+
+
+def test_minimax_extracts_internal_main_work_project_capture():
+    transport = FakeMiniMaxTransport(
+        minimax_response(
+            json.dumps(
+                {
+                    "录入类型": "主业事项",
+                    "事项名称": "新的主业相关系统",
+                    "项目类型": "主业系统建设",
+                    "阶段": "推进中",
+                    "当前重点": "做一个新的主业相关系统",
+                    "下次动作": "明天继续推进",
+                    "下次跟进日期": "明天",
+                },
+                ensure_ascii=False,
+            )
+        )
+    )
+    client = MiniMaxCaptureClient(api_key="test-key", transport=transport)
+
+    capture = client.extract_capture("做一个新的主业相关系统，明天继续", existing_customers=[], today="2026-04-30")
+
+    assert isinstance(capture, CaptureDraft)
+    assert capture.kind == "主业事项"
+    assert isinstance(capture.project_draft, ProjectDraft)
+    assert capture.project_draft.brand_customer_name == INTERNAL_MAIN_WORK_NAME
+    assert capture.project_draft.project_name == "2026-04 新的主业相关系统"
+    assert capture.project_draft.project_type == "主业系统建设"
+    assert capture.project_draft.stage == "推进中"
+    assert capture.project_draft.next_follow_up_date == "2026-05-01"
+    assert capture.project_draft.next_action == "明天继续推进"
+
+    system_prompt = transport.requests[0]["payload"]["messages"][0]["content"]
+    user_prompt = transport.requests[0]["payload"]["messages"][1]["content"]
+    assert "主业管理录入助手" in system_prompt
+    assert "录入类型" in user_prompt
+
+
+def test_minimax_extracts_customer_project_participant_roles():
+    transport = FakeMiniMaxTransport(
+        minimax_response(
+            json.dumps(
+                {
+                    "录入类型": "客户项目",
+                    "客户名称": "爱慕",
+                    "项目名称": "2026-05 达人拍摄项目",
+                    "项目类型": "品牌推广",
+                    "阶段": "推进中",
+                    "当前重点": "确认拍摄排期、供应商和垫资安排",
+                    "下次动作": "明天催甲方负责人确认法务意见",
+                    "下次跟进日期": "明天",
+                    "项目参与人": [
+                        {"所属方": "客户方", "关系": "负责人", "人": "李总"},
+                        {"所属方": "供应商", "关系": "拍摄供应商", "人": "实施方A"},
+                        {"所属方": "垫资方", "关系": "垫资商", "人": "老周"},
+                        {"所属方": "内部支持", "关系": "法务", "人": "王法务"},
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        )
+    )
+    client = MiniMaxCaptureClient(api_key="test-key", transport=transport)
+
+    capture = client.extract_capture(
+        "爱慕 5 月达人拍摄项目，李总是客户负责人，实施方A对接拍摄供应商，老周垫资，王法务明天看合同。",
+        existing_customers=["爱慕"],
+        today="2026-05-02",
+    )
+
+    assert capture.kind == "客户项目"
+    assert capture.project_draft is not None
+    assert capture.project_draft.brand_customer_name == "爱慕"
+    assert capture.project_draft.next_follow_up_date == "2026-05-03"
+    assert [(role.side, role.relation, role.name) for role in capture.project_draft.participant_roles] == [
+        ("客户方", "负责人", "李总"),
+        ("供应商", "拍摄供应商", "实施方A"),
+        ("垫资方", "垫资商", "老周"),
+        ("内部支持", "法务", "王法务"),
+    ]
+
+    user_prompt = transport.requests[0]["payload"]["messages"][1]["content"]
+    assert "项目参与人" in user_prompt
+    assert "所属方、关系、人" in user_prompt
+    assert "供应商" in user_prompt
+    assert "垫资商" in user_prompt
+    assert "法务" in user_prompt
 
 
 def test_minimax_extracts_json_from_markdown_code_fence():
@@ -194,11 +283,11 @@ def test_minimax_falls_back_to_shop_ka_store_name_from_raw_text():
         minimax_response(
             json.dumps(
                 {
-                    "客户名称": "李岩",
+                    "客户名称": "甲方联系人A",
                     "客户类型": "网店KA客户",
                     "阶段": "已合作",
                     "业务方向": "KA版 / AI裂变 / AI详情页",
-                    "联系人": "李岩",
+                    "联系人": "甲方联系人A",
                     "店铺规模": "抖店 · 已订购 KA版",
                     "当前需求": "已使用 AI裂变，并对 AI详情页功能有明确兴趣",
                     "沟通日期": "2026-04-23",

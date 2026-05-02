@@ -25,6 +25,17 @@ OBSIDIAN_PROJECT_ROOT = (
     / "项目数据"
 )
 
+OBSIDIAN_PERSON_ROOT = (
+    Path.home()
+    / "Library"
+    / "Mobile Documents"
+    / "iCloud~md~obsidian"
+    / "Documents"
+    / "项目管理"
+    / "草莓客户管理系统--主业"
+    / "人员数据"
+)
+
 OBSIDIAN_DEVELOPMENT_LOG_ROOT = (
     Path.home()
     / "Library"
@@ -50,6 +61,10 @@ def default_main_work_root() -> Path:
 
 def default_project_root() -> Path:
     return OBSIDIAN_PROJECT_ROOT
+
+
+def default_person_root() -> Path:
+    return OBSIDIAN_PERSON_ROOT
 
 
 def default_development_log_root() -> Path:

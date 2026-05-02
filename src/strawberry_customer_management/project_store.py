@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from datetime import date
 
 from strawberry_customer_management.markdown_store import (
     PLACEHOLDER_NAMES,
@@ -24,12 +25,15 @@ from strawberry_customer_management.markdown_store import (
 )
 from strawberry_customer_management.models import (
     ApprovalEntry,
+    DidaDiaryEntry,
+    INTERNAL_MAIN_WORK_NAME,
     PartyAInfo,
     ProjectDetail,
     ProjectDraft,
     ProjectProgressNode,
     ProjectRecord,
     ProjectRole,
+    normalize_internal_project_name,
 )
 from strawberry_customer_management.paths import default_project_root
 
@@ -62,6 +66,14 @@ def _next_follow_up_date(value: object) -> str:
 def _with_next_follow_up_date(value, next_follow_up_date: str):
     object.__setattr__(value, "next_follow_up_date", next_follow_up_date)
     return value
+
+
+def _customer_page_link_for_project(draft: ProjectDraft) -> str:
+    if draft.customer_page_link:
+        return draft.customer_page_link
+    if draft.brand_customer_name == INTERNAL_MAIN_WORK_NAME:
+        return ""
+    return f"[[客户/客户--{draft.brand_customer_name}]]"
 
 
 def _parse_table(section: str) -> list[dict[str, str]]:
@@ -145,18 +157,25 @@ def _split_structured_block_body(body: str, allowed_keys: set[str]) -> tuple[str
 
 
 def _project_role_section_default() -> str:
-    return "- 暂无参与角色"
+    return "- 暂无参与人"
 
 
 def _project_progress_section_default() -> str:
     return "- 暂无项目进度"
 
 
+def _dida_diary_section_default() -> str:
+    return "- 暂无滴答日记"
+
+
 def _parse_participant_roles(section: str) -> tuple[list[ProjectRole], str]:
+    table_rows = _parse_people_table(section)
+    if table_rows:
+        return table_rows, ""
     blocks, extras = _structured_section_parts(section)
     roles: list[ProjectRole] = []
     block_extras: list[str] = []
-    allowed_keys = {"角色", "职责", "备注"}
+    allowed_keys = {"所属方", "关系", "角色", "职责", "备注"}
     for head, body in blocks:
         structured_body, trailing_extra = _split_structured_block_body(body, allowed_keys)
         data = _bullet_map(structured_body)
@@ -176,6 +195,8 @@ def _parse_participant_roles(section: str) -> tuple[list[ProjectRole], str]:
                 role=_clean_optional_value(data.get("角色", "") or role_from_head),
                 responsibility=_clean_optional_value(data.get("职责", "")),
                 note=note,
+                side=_clean_optional_value(data.get("所属方", "")),
+                relation=_clean_optional_value(data.get("关系", "") or data.get("角色", "") or role_from_head),
             )
         )
     extra_markdown = "\n\n".join([part for part in [extras, *block_extras] if part.strip()]).strip()
@@ -184,24 +205,37 @@ def _parse_participant_roles(section: str) -> tuple[list[ProjectRole], str]:
     return roles, extra_markdown
 
 
+def _parse_people_table(section: str) -> list[ProjectRole]:
+    rows = _parse_table(section)
+    people: list[ProjectRole] = []
+    for row in rows:
+        name = _clean_optional_value(row.get("人", "") or row.get("姓名", ""))
+        if not name:
+            continue
+        people.append(
+            ProjectRole(
+                name=Path(_extract_wikilink_target(name)).name,
+                role=_clean_optional_value(row.get("关系", "") or row.get("角色", "")),
+                side=_clean_optional_value(row.get("所属方", "")),
+                relation=_clean_optional_value(row.get("关系", "") or row.get("角色", "")),
+                person_link=name if "[[" in name else "",
+            )
+        )
+    return people
+
+
 def _format_participant_roles(roles: list[ProjectRole], extra_markdown: str) -> str:
     parts: list[str] = []
     if roles:
-        parts.append(
-            "\n\n".join(
-                [
-                    "\n".join(
-                        [
-                            f"### {role.name.strip() or '待补角色'}",
-                            f"- 角色：{role.role or '待补充'}",
-                            f"- 职责：{role.responsibility or '待补充'}",
-                            f"- 备注：{role.note or '待补充'}",
-                        ]
-                    )
-                    for role in roles
-                ]
-            )
-        )
+        rows = [
+            "| 所属方 | 关系 | 人 |",
+            "| --- | --- | --- |",
+        ]
+        for role in roles:
+            name = role.name.strip() or "待补姓名"
+            link = role.person_link or f"[[人员/{name}]]"
+            rows.append(_format_markdown_row([role.display_side or "待补充", role.display_relation or "待补充", link]))
+        parts.append("\n".join(rows))
     normalized_extra = extra_markdown.strip()
     if normalized_extra and normalized_extra != _project_role_section_default():
         parts.append(normalized_extra)
@@ -274,6 +308,131 @@ def _format_progress_nodes(nodes: list[ProjectProgressNode], extra_markdown: str
     return "\n\n".join(parts).rstrip() + "\n"
 
 
+def _parse_dida_diary_entries(section: str) -> tuple[list[DidaDiaryEntry], str]:
+    entries: list[DidaDiaryEntry] = []
+    extras: list[str] = []
+    blocks, block_extras = _structured_section_parts(section)
+
+    for head, body in blocks:
+        data = _bullet_map(body)
+        scheduled_at = _clean_optional_value(data.get("时间", "") or data.get("计划时间", ""))
+        title_from_head = head
+        date_match = re.match(r"(?P<date>20\d{2}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2})?)\s*(?P<title>.*)", head)
+        if date_match:
+            scheduled_at = scheduled_at or date_match.group("date").strip()
+            title_from_head = date_match.group("title").strip()
+        note = _clean_optional_value(data.get("备注", ""))
+        entries.append(
+            DidaDiaryEntry(
+                scheduled_at=scheduled_at,
+                status=_clean_optional_value(data.get("状态", "")),
+                title=_clean_optional_value(data.get("任务", "") or data.get("标题", "") or title_from_head),
+                parent=_clean_optional_value(data.get("清单", "") or data.get("父任务", "")),
+                source=_clean_optional_value(data.get("来源", "")) or "滴答日记",
+                note=note,
+            )
+        )
+    line_source = block_extras if blocks else section
+    for line in line_source.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("### "):
+            continue
+        if not stripped.startswith("- "):
+            if stripped != _dida_diary_section_default():
+                extras.append(line)
+            continue
+        content = stripped[2:].strip()
+        if content in {_dida_diary_section_default().removeprefix("- "), "待补充"}:
+            continue
+        entry = _parse_dida_diary_line(content)
+        if entry is None:
+            extras.append(line)
+            continue
+        entries.append(entry)
+
+    return entries, "\n".join(part for part in extras if part.strip()).strip()
+
+
+def _parse_dida_diary_line(content: str) -> DidaDiaryEntry | None:
+    normalized = re.sub(r"\s*[｜|]\s*", "｜", content.strip())
+    parts = [part.strip() for part in normalized.split("｜") if part.strip()]
+    if len(parts) >= 2:
+        source = "滴答日记"
+        note_parts: list[str] = []
+        for part in parts[4:]:
+            if part.startswith("来源"):
+                source = _clean_optional_value(re.split(r"[：:]", part, maxsplit=1)[-1])
+            elif part.startswith("备注"):
+                note_parts.append(_clean_optional_value(re.split(r"[：:]", part, maxsplit=1)[-1]))
+            else:
+                note_parts.append(part)
+        return DidaDiaryEntry(
+            scheduled_at=parts[0],
+            status=parts[1],
+            title=parts[2] if len(parts) >= 3 else "",
+            parent=parts[3] if len(parts) >= 4 else "",
+            source=source or "滴答日记",
+            note="；".join(part for part in note_parts if part),
+        )
+    date_match = re.match(r"(?P<date>20\d{2}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2})?)\s*(?P<title>.*)", content)
+    if date_match:
+        return DidaDiaryEntry(
+            scheduled_at=date_match.group("date").strip(),
+            status="待办",
+            title=date_match.group("title").strip(),
+        )
+    return None
+
+
+def _format_dida_diary_entries(entries: list[DidaDiaryEntry], extra_markdown: str) -> str:
+    parts: list[str] = []
+    if entries:
+        lines: list[str] = []
+        for entry in sorted(entries, key=lambda item: item.scheduled_at or "", reverse=True):
+            segments = [
+                entry.scheduled_at or "待补时间",
+                entry.status or "待办",
+                entry.title or "待补任务",
+                entry.parent or "待补清单",
+                f"来源：{entry.source or '滴答日记'}",
+            ]
+            if entry.note:
+                segments.append(f"备注：{entry.note}")
+            lines.append("- " + "｜".join(segments))
+        parts.append("\n".join(lines))
+    normalized_extra = extra_markdown.strip()
+    if normalized_extra and normalized_extra != _dida_diary_section_default():
+        parts.append(normalized_extra)
+    if not parts:
+        return _dida_diary_section_default() + "\n"
+    return "\n\n".join(parts).rstrip() + "\n"
+
+
+def _latest_dida_diary_entry(entries: list[DidaDiaryEntry]) -> DidaDiaryEntry | None:
+    if not entries:
+        return None
+    return sorted(entries, key=lambda item: item.scheduled_at or "", reverse=True)[0]
+
+
+def _summarize_dida_diary_entry(entry: DidaDiaryEntry | None) -> str:
+    if entry is None:
+        return ""
+    return " ".join(part for part in (entry.scheduled_at, entry.title or entry.note, entry.status) if part).strip()
+
+
+def _has_valid_follow_up_date(next_follow_up_date: str) -> bool:
+    normalized = next_follow_up_date.strip()
+    return bool(normalized and normalized not in PLACEHOLDER_VALUES and normalized not in {"待排期", "已归档", "暂缓"})
+
+
+def _dida_diary_status(entries: list[DidaDiaryEntry], next_follow_up_date: str) -> str:
+    if entries:
+        return "已关联滴答"
+    if _has_valid_follow_up_date(next_follow_up_date):
+        return "待建滴答"
+    return "无排期"
+
+
 class MarkdownProjectStore:
     def __init__(self, root: Path | None = None) -> None:
         self.root = root or default_project_root()
@@ -296,6 +455,8 @@ class MarkdownProjectStore:
             if page_link:
                 target = _extract_wikilink_target(page_link)
                 page_path = self.root / f"{target}.md"
+            next_follow_up_date = row.get("下次跟进日期", "").strip()
+            dida_diary_status, latest_dida_diary = self._read_dida_diary_summary(page_path, next_follow_up_date)
             records.append(
                 _with_next_follow_up_date(
                     ProjectRecord(
@@ -312,8 +473,10 @@ class MarkdownProjectStore:
                         page_path=page_path,
                         path_status="主业路径有效" if Path(row.get("主业项目路径", "").strip()).exists() else "主业路径失效",
                         latest_approval_status=self._read_latest_approval_status(page_path),
+                        dida_diary_status=dida_diary_status,
+                        latest_dida_diary=latest_dida_diary,
                     ),
-                    row.get("下次跟进日期", "").strip(),
+                    next_follow_up_date,
                 )
             )
         return sort_project_records(records)
@@ -355,8 +518,11 @@ class MarkdownProjectStore:
         )
         override_enabled = party_a.get("是否项目覆盖", "") == "是"
         effective_party_a = override_party_a.resolved_with(default_party_a) if override_enabled else default_party_a
-        participant_roles, participant_roles_markdown = _parse_participant_roles(_section_body(text, "参与角色"))
+        participant_roles, participant_roles_markdown = _parse_participant_roles(_section_body(text, "参与人"))
+        if not participant_roles and not participant_roles_markdown:
+            participant_roles, participant_roles_markdown = _parse_participant_roles(_section_body(text, "参与角色"))
         progress_nodes, progress_markdown = _parse_progress_nodes(_section_body(text, "项目进度"))
+        dida_diary_entries, dida_diary_markdown = _parse_dida_diary_entries(_section_body(text, "滴答日记"))
         materials_markdown = _section_body(text, "资料概览").strip()
         notes_markdown = _section_body(text, "项目沉淀").strip()
         approval_entries = sort_approval_entries(_parse_approval_entries(text, "审批记录"))
@@ -376,6 +542,8 @@ class MarkdownProjectStore:
                 page_path=path,
                 path_status=basic.get("主业路径状态", "主业路径失效" if main_work_path and not Path(main_work_path).exists() else "主业路径有效"),
                 latest_approval_status=summarize_approval_entry(approval_entries[0] if approval_entries else None),
+                dida_diary_status=_dida_diary_status(dida_diary_entries, judgement.get("下次跟进日期", "")),
+                latest_dida_diary=_summarize_dida_diary_entry(_latest_dida_diary_entry(dida_diary_entries)),
                 customer_page_link=basic.get("关联客户页", ""),
                 risk=judgement.get("风险提醒", ""),
                 party_a_source="项目覆盖甲方信息" if override_enabled else party_a.get("默认来源", ""),
@@ -385,6 +553,8 @@ class MarkdownProjectStore:
                 participant_roles_markdown=participant_roles_markdown,
                 progress_nodes=progress_nodes,
                 progress_markdown=progress_markdown,
+                dida_diary_entries=dida_diary_entries,
+                dida_diary_markdown=dida_diary_markdown,
                 materials_markdown=materials_markdown,
                 notes_markdown=notes_markdown,
                 approval_entries=approval_entries,
@@ -397,39 +567,73 @@ class MarkdownProjectStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.project_dir.mkdir(parents=True, exist_ok=True)
         updated_at = draft.resolved_updated_at()
-        source_name = draft.original_project_name.strip() or draft.project_name
-        source_path = self._project_path(draft.brand_customer_name, source_name)
-        target_path = self._project_path(draft.brand_customer_name, draft.project_name)
-        is_rename = bool(draft.original_project_name.strip() and draft.original_project_name.strip() != draft.project_name)
+        target_project_name = draft.project_name.strip()
+        if draft.brand_customer_name == INTERNAL_MAIN_WORK_NAME:
+            target_project_name = normalize_internal_project_name(target_project_name, updated_at or date.today().isoformat())
+        normalized_original_name = draft.original_project_name.strip()
+        normalized_draft = ProjectDraft(
+            brand_customer_name=draft.brand_customer_name,
+            project_name=target_project_name,
+            stage=draft.stage,
+            original_project_name=normalized_original_name,
+            year=draft.year,
+            project_type=draft.project_type,
+            current_focus=draft.current_focus,
+            next_action=draft.next_action,
+            next_follow_up_date=draft.next_follow_up_date,
+            risk=draft.risk,
+            customer_page_link=draft.customer_page_link,
+            main_work_path=draft.main_work_path,
+            path_status=draft.path_status,
+            party_a_source=draft.party_a_source,
+            default_party_a_info=draft.default_party_a_info,
+            party_a_info=draft.party_a_info,
+            override_party_a=draft.override_party_a,
+            participant_roles=draft.participant_roles,
+            participant_roles_markdown=draft.participant_roles_markdown,
+            progress_nodes=draft.progress_nodes,
+            progress_markdown=draft.progress_markdown,
+            dida_diary_entries=draft.dida_diary_entries,
+            dida_diary_markdown=draft.dida_diary_markdown,
+            materials_markdown=draft.materials_markdown,
+            notes_markdown=draft.notes_markdown,
+            approval_entries=draft.approval_entries,
+            latest_approval_status=draft.latest_approval_status,
+            updated_at=draft.updated_at,
+        )
+        source_name = normalized_original_name or normalized_draft.project_name
+        source_path = self._project_path(normalized_draft.brand_customer_name, source_name)
+        target_path = self._project_path(normalized_draft.brand_customer_name, normalized_draft.project_name)
+        is_rename = bool(normalized_original_name and normalized_original_name != normalized_draft.project_name)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         existing_approvals: list[ApprovalEntry] = []
 
         if is_rename:
             if target_path.exists():
-                raise ValueError(f"项目「{draft.project_name}」已存在，不能重命名覆盖。")
+                raise ValueError(f"项目「{normalized_draft.project_name}」已存在，不能重命名覆盖。")
             if not source_path.exists():
-                raise KeyError(f"{draft.brand_customer_name}/{source_name}")
+                raise KeyError(f"{normalized_draft.brand_customer_name}/{source_name}")
             text = source_path.read_text(encoding="utf-8")
             existing_approvals = _parse_approval_entries(text, "审批记录")
-            text = re.sub(r"^# 项目--.*$", f"# 项目--{draft.project_name}", text, count=1, flags=re.M)
+            text = re.sub(r"^# 项目--.*$", f"# 项目--{normalized_draft.project_name}", text, count=1, flags=re.M)
             text = self._ensure_project_sections(text)
-            text = self._update_existing_page(text, draft, updated_at)
+            text = self._update_existing_page(text, normalized_draft, updated_at)
         elif target_path.exists():
             text = target_path.read_text(encoding="utf-8")
             existing_approvals = _parse_approval_entries(text, "审批记录")
             text = self._ensure_project_sections(text)
-            text = self._update_existing_page(text, draft, updated_at)
+            text = self._update_existing_page(text, normalized_draft, updated_at)
         else:
-            text = self._build_new_page(draft, updated_at)
+            text = self._build_new_page(normalized_draft, updated_at)
 
-        approval_entries = sort_approval_entries(draft.approval_entries or existing_approvals)
+        approval_entries = sort_approval_entries(normalized_draft.approval_entries or existing_approvals)
         text = self._replace_approval_section(text, approval_entries)
 
         target_path.write_text(text.rstrip() + "\n", encoding="utf-8")
         if is_rename:
             source_path.unlink(missing_ok=True)
-        self._upsert_summary_row(draft, updated_at)
-        return self.get_project(draft.brand_customer_name, draft.project_name)
+        self._upsert_summary_row(normalized_draft, updated_at)
+        return self.get_project(normalized_draft.brand_customer_name, normalized_draft.project_name)
 
     def upsert_discovered_project(self, draft: ProjectDraft) -> ProjectDetail:
         path = self._project_path(draft.brand_customer_name, draft.project_name)
@@ -459,6 +663,8 @@ class MarkdownProjectStore:
                 participant_roles_markdown=draft.participant_roles_markdown or existing.participant_roles_markdown,
                 progress_nodes=draft.progress_nodes or existing.progress_nodes,
                 progress_markdown=draft.progress_markdown or existing.progress_markdown,
+                dida_diary_entries=draft.dida_diary_entries or existing.dida_diary_entries,
+                dida_diary_markdown=draft.dida_diary_markdown or existing.dida_diary_markdown,
                 materials_markdown=draft.materials_markdown or existing.materials_markdown,
                 notes_markdown=existing.notes_markdown or draft.notes_markdown,
                 approval_entries=existing.approval_entries or draft.approval_entries,
@@ -481,7 +687,7 @@ class MarkdownProjectStore:
 - 项目名称：{draft.project_name}
 - 项目状态：{draft.stage}
 - 项目类型：{draft.project_type or "待补充"}
-- 关联客户页：{draft.customer_page_link or f"[[客户/客户--{draft.brand_customer_name}]]"}
+- 关联客户页：{_customer_page_link_for_project(draft)}
 - 主业项目路径：{draft.main_work_path}
 - 主业路径状态：{draft.path_status or "主业路径有效"}
 - 最近同步时间：{updated_at}
@@ -502,7 +708,7 @@ class MarkdownProjectStore:
 - 项目覆盖电子邮箱：{draft.party_a_info.email or "待补充"}
 - 项目覆盖通讯地址：{draft.party_a_info.address or "待补充"}
 
-## 参与角色
+## 参与人
 {_format_participant_roles(draft.participant_roles, draft.participant_roles_markdown)}
 
 ## 当前判断
@@ -514,6 +720,9 @@ class MarkdownProjectStore:
 
 ## 项目进度
 {_format_progress_nodes(draft.progress_nodes, draft.progress_markdown)}
+
+## 滴答日记
+{_format_dida_diary_entries(draft.dida_diary_entries, draft.dida_diary_markdown)}
 
 ## 审批记录
 {_format_approval_section(draft.approval_entries, "- 暂无审批记录")}
@@ -527,9 +736,10 @@ class MarkdownProjectStore:
 
     def _ensure_project_sections(self, text: str) -> str:
         text = _ensure_section(text, "甲方信息", _party_a_section_default())
-        text = _ensure_section(text, "参与角色", _project_role_section_default())
+        text = _ensure_section(text, "参与人", _project_role_section_default())
         text = _ensure_section(text, "审批记录", "- 暂无审批记录")
         text = _ensure_section(text, "项目进度", _project_progress_section_default())
+        text = _ensure_section(text, "滴答日记", _dida_diary_section_default())
         text = _ensure_section(text, "资料概览", "- 待同步桌面项目资料")
         text = _ensure_section(text, "项目沉淀", "- 待补项目沉淀")
         return text
@@ -568,8 +778,12 @@ class MarkdownProjectStore:
         ]
         for section, key, value in updates:
             text = _replace_or_add_bullet(text, section, key, value)
-        text = _replace_section_body(text, "参与角色", _format_participant_roles(draft.participant_roles, draft.participant_roles_markdown))
+        text = _replace_section_body(text, "参与人", _format_participant_roles(draft.participant_roles, draft.participant_roles_markdown))
         text = _replace_section_body(text, "项目进度", _format_progress_nodes(draft.progress_nodes, draft.progress_markdown))
+        existing_dida_entries, existing_dida_markdown = _parse_dida_diary_entries(_section_body(text, "滴答日记"))
+        dida_entries = draft.dida_diary_entries or existing_dida_entries
+        dida_markdown = draft.dida_diary_markdown or existing_dida_markdown
+        text = _replace_section_body(text, "滴答日记", _format_dida_diary_entries(dida_entries, dida_markdown))
         text = _replace_section_body(text, "资料概览", f"{draft.materials_markdown.rstrip()}\n" if draft.materials_markdown else "- 待同步桌面项目资料\n")
         text = _replace_section_body(text, "项目沉淀", f"{draft.notes_markdown.rstrip()}\n" if draft.notes_markdown else "- 待补项目沉淀\n")
         return text
@@ -598,6 +812,8 @@ class MarkdownProjectStore:
                 participant_roles_markdown=detail.participant_roles_markdown,
                 progress_nodes=detail.progress_nodes,
                 progress_markdown=detail.progress_markdown,
+                dida_diary_entries=detail.dida_diary_entries,
+                dida_diary_markdown=detail.dida_diary_markdown,
                 materials_markdown=detail.materials_markdown,
                 notes_markdown=detail.notes_markdown,
                 approval_entries=_merge_approval_entries(detail.approval_entries, [entry]),
@@ -633,6 +849,13 @@ class MarkdownProjectStore:
         text = page_path.read_text(encoding="utf-8")
         entries = sort_approval_entries(_parse_approval_entries(text, "审批记录"))
         return summarize_approval_entry(entries[0] if entries else None)
+
+    def _read_dida_diary_summary(self, page_path: Path | None, next_follow_up_date: str) -> tuple[str, str]:
+        if page_path is None or not page_path.exists():
+            return _dida_diary_status([], next_follow_up_date), ""
+        text = page_path.read_text(encoding="utf-8")
+        entries, _ = _parse_dida_diary_entries(_section_body(text, "滴答日记"))
+        return _dida_diary_status(entries, next_follow_up_date), _summarize_dida_diary_entry(_latest_dida_diary_entry(entries))
 
     def _upsert_summary_row(self, draft: ProjectDraft, updated_at: str) -> None:
         if not self.summary_path.exists():

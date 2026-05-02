@@ -5,12 +5,15 @@ from datetime import date, timedelta
 from difflib import SequenceMatcher
 from html import escape
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import QDate, Signal, Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QDateEdit,
+    QDialog,
+    QDialogButtonBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QPushButton,
     QScrollArea,
@@ -22,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from strawberry_customer_management.models import (
     CUSTOMER_TYPES,
+    INTERNAL_MAIN_WORK_NAME,
     PROJECT_CUSTOMER_TYPES,
     CustomerDetail,
     CustomerRecord,
@@ -31,6 +35,10 @@ from strawberry_customer_management.project_store import sort_project_records
 
 
 ALL_CUSTOMERS_FILTER = "全部客户"
+ALL_ITEMS_SCOPE_FILTER = "全部事项"
+CUSTOMER_ITEMS_SCOPE_FILTER = "客户相关"
+INTERNAL_ITEMS_SCOPE_FILTER = "内部主业"
+INTERNAL_MAIN_WORK_CUSTOMER_NAME = INTERNAL_MAIN_WORK_NAME
 
 
 class OverviewPage(QWidget):
@@ -89,6 +97,12 @@ class OverviewPage(QWidget):
         heading.addWidget(title)
         heading.addWidget(self.meta_label)
 
+        self.scope_filter_combo = QComboBox()
+        self.scope_filter_combo.setObjectName("OverviewFilterCombo")
+        self.scope_filter_combo.addItems(
+            [ALL_ITEMS_SCOPE_FILTER, CUSTOMER_ITEMS_SCOPE_FILTER, INTERNAL_ITEMS_SCOPE_FILTER]
+        )
+        self.scope_filter_combo.currentTextChanged.connect(lambda _text: self._refresh())
         self.type_filter_combo = QComboBox()
         self.type_filter_combo.setObjectName("OverviewFilterCombo")
         self.type_filter_combo.addItems([ALL_CUSTOMERS_FILTER, *CUSTOMER_TYPES])
@@ -101,6 +115,7 @@ class OverviewPage(QWidget):
         self.quick_capture_button.clicked.connect(lambda _checked=False: self.quick_capture_requested.emit())
         controls = QHBoxLayout()
         controls.setSpacing(10)
+        controls.addWidget(self.scope_filter_combo)
         controls.addWidget(self.type_filter_combo)
         controls.addWidget(export_button)
         controls.addWidget(self.quick_capture_button)
@@ -110,7 +125,7 @@ class OverviewPage(QWidget):
 
         topbar_footer = QHBoxLayout()
         topbar_footer.setSpacing(8)
-        self.filter_badge_label = QLabel("筛选：全部客户")
+        self.filter_badge_label = QLabel("筛选：全部事项 / 全部客户")
         self.filter_badge_label.setObjectName("TopbarBadge")
         self.priority_badge_label = QLabel("本周 0 项")
         self.priority_badge_label.setObjectName("PriorityBadge")
@@ -141,6 +156,7 @@ class OverviewPage(QWidget):
             ("逾期", "已经该跟但还没处理"),
             ("今天", "今天需要确认"),
             ("明天", "提前看明天节点"),
+            ("后续排期", "当周以后已安排"),
             ("待排期", "有下一步但没日期"),
         ):
             self.metrics_layout.addWidget(self._build_metric_card(label, note), 1)
@@ -160,7 +176,7 @@ class OverviewPage(QWidget):
         title_label = QLabel("本周跟进清单")
         title_label.setObjectName("SectionTitle")
         overview_title.addWidget(title_label)
-        self.customer_count_label = QLabel("本周 0 个事项")
+        self.customer_count_label = QLabel("当前 0 个事项")
         self.customer_count_label.setObjectName("SoftBadge")
         overview_header.addLayout(overview_title, 1)
         overview_header.addStretch(1)
@@ -231,11 +247,12 @@ class OverviewPage(QWidget):
         detail_layout.addWidget(self.detail_browser)
         detail_layout.addLayout(related_title_row)
         detail_layout.addLayout(self.related_projects_layout)
+        self.detail_card = detail_card
+        self.detail_card.setVisible(False)
 
         root.addWidget(topbar)
         root.addLayout(self.metrics_layout)
         root.addLayout(workspace)
-        root.addWidget(detail_card)
         root.addStretch(1)
         self._apply_page_styles()
 
@@ -391,19 +408,31 @@ class OverviewPage(QWidget):
         return panel, items
 
     def _refresh(self) -> None:
+        selected_scope = (
+            self.scope_filter_combo.currentText() if hasattr(self, "scope_filter_combo") else ALL_ITEMS_SCOPE_FILTER
+        )
         selected_type = self.type_filter_combo.currentText() if hasattr(self, "type_filter_combo") else ALL_CUSTOMERS_FILTER
         source_records = self._focus_records or self._records
         if selected_type == ALL_CUSTOMERS_FILTER:
-            filtered_records = list(source_records)
+            type_filtered_records = list(source_records)
         else:
-            filtered_records = [record for record in source_records if _has_customer_type(record.customer_type, selected_type)]
+            type_filtered_records = [record for record in source_records if _has_customer_type(record.customer_type, selected_type)]
+        include_customer_items = selected_scope in {ALL_ITEMS_SCOPE_FILTER, CUSTOMER_ITEMS_SCOPE_FILTER}
+        include_internal_items = selected_scope in {ALL_ITEMS_SCOPE_FILTER, INTERNAL_ITEMS_SCOPE_FILTER}
+        filtered_records = type_filtered_records if include_customer_items else []
         records = _sort_follow_up_customers(filtered_records)
         display_records = [record for record in records if _visible_next_action(record.next_action) or record.next_follow_up_date]
-        if selected_type == ALL_CUSTOMERS_FILTER:
-            project_records = list(self._project_records)
-        else:
-            visible_customer_names = {record.name for record in filtered_records}
-            project_records = [record for record in self._project_records if record.brand_customer_name in visible_customer_names]
+        project_records: list[ProjectRecord] = []
+        if include_customer_items:
+            customer_project_records = [record for record in self._project_records if not _is_internal_main_work_project(record)]
+            if selected_type != ALL_CUSTOMERS_FILTER:
+                visible_customer_names = {record.name for record in type_filtered_records}
+                customer_project_records = [
+                    record for record in customer_project_records if record.brand_customer_name in visible_customer_names
+                ]
+            project_records.extend(customer_project_records)
+        if include_internal_items:
+            project_records.extend(record for record in self._project_records if _is_internal_main_work_project(record))
         nodes = _sort_follow_up_nodes(_follow_up_nodes_for_customers(records) + _follow_up_nodes_for_projects(project_records))
         nodes = _collapse_overlapping_follow_up_nodes(nodes)
         self._displayed_records = display_records
@@ -415,32 +444,36 @@ class OverviewPage(QWidget):
             else:
                 self.show_customer_detail(None)
 
-        self._refresh_meta(selected_type)
+        self._refresh_meta(selected_scope, selected_type)
         self._refresh_metrics(nodes)
         self._refresh_follow_up_cards(nodes)
         self._refresh_sidebars(filtered_records, nodes)
 
-    def _refresh_meta(self, selected_type: str) -> None:
+    def _refresh_meta(self, selected_scope: str, selected_type: str) -> None:
         latest_update = max(
             (record.updated_at for record in self._records if _sortable_updated_at(record.updated_at)),
             default="待同步",
         )
         today = date.today().isoformat()
         self.meta_label.setText(f"今天：{today} · 更新时间：{latest_update}")
-        self.filter_badge_label.setText(f"筛选：{selected_type}")
+        self.filter_badge_label.setText(f"筛选：{selected_scope} / {selected_type}")
 
     def _refresh_metrics(self, nodes: list["FollowUpNode"]) -> None:
-        counts = {label: sum(1 for node in nodes if node.group == label) for label in ("逾期", "今天", "明天", "待排期")}
+        counts = {
+            label: sum(1 for node in nodes if node.group == label)
+            for label in ("逾期", "今天", "明天", "后续排期", "待排期")
+        }
         self.metric_value_labels["逾期"].setText(str(counts.get("逾期", 0)))
         self.metric_value_labels["今天"].setText(str(counts.get("今天", 0)))
         self.metric_value_labels["明天"].setText(str(counts.get("明天", 0)))
+        self.metric_value_labels["后续排期"].setText(str(counts.get("后续排期", 0)))
         self.metric_value_labels["待排期"].setText(str(counts.get("待排期", 0)))
         priority_count = counts.get("逾期", 0) + counts.get("今天", 0) + counts.get("明天", 0)
         self.priority_badge_label.setText(f"优先 {priority_count} 项")
 
     def _refresh_follow_up_cards(self, nodes: list["FollowUpNode"]) -> None:
         _clear_layout(self.customer_grid)
-        self.customer_count_label.setText(f"本周 {len(nodes)} 个事项")
+        self.customer_count_label.setText(f"当前 {len(nodes)} 个事项")
         if not nodes:
             empty = QLabel("当前没有事项。")
             empty.setObjectName("EmptyState")
@@ -606,13 +639,14 @@ class OverviewPage(QWidget):
         footer.addStretch(1)
         view_button = QPushButton("›")
         view_button.setObjectName("TimelineOpenButton")
-        view_button.clicked.connect(lambda _checked=False, name=node.customer_name: self._select_customer(name))
+        view_button.clicked.connect(lambda _checked=False, current_node=node: self._open_follow_up_node(current_node))
         action_combo = QComboBox()
         action_combo.setObjectName("TimelineActionCombo")
         action_combo.addItem("⋯", "")
         for action_label, action in (
             ("完成", "complete"),
             ("改排期", "reschedule_prompt"),
+            ("改今天", "today"),
             ("改明天", "tomorrow"),
             ("暂缓", "suspend"),
             ("收档", "archive"),
@@ -703,6 +737,11 @@ class OverviewPage(QWidget):
         self._refresh_follow_up_cards(self._displayed_nodes)
         self.customer_selected.emit(name)
 
+    def _open_follow_up_node(self, node: "FollowUpNode") -> None:
+        if node.kind == "project" and _is_internal_main_work_customer_name(node.customer_name):
+            return
+        self._select_customer(node.customer_name)
+
     def _handle_follow_up_action(self, node: "FollowUpNode", combo: QComboBox, index: int) -> None:
         action = combo.itemData(index)
         if not action:
@@ -718,24 +757,15 @@ class OverviewPage(QWidget):
         combo.blockSignals(False)
 
     def _prompt_reschedule(self, node: "FollowUpNode") -> None:
-        current_text = node.follow_up_date if _is_editable_follow_up_date(node.follow_up_date) else ""
-        value, accepted = QInputDialog.getText(
-            self,
-            "改排期",
-            "下次跟进日期（YYYY-MM-DD，留空改为待排期）",
-            text=current_text,
+        dialog = FollowUpRescheduleDialog(
+            current_text=node.follow_up_date if _is_editable_follow_up_date(node.follow_up_date) else "",
+            parent=self,
         )
-        if not accepted:
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        normalized = value.strip()
-        if normalized:
-            try:
-                parsed = date.fromisoformat(normalized)
-            except ValueError:
-                return
-            action = f"reschedule:{parsed.isoformat()}"
-        else:
-            action = "unschedule"
+        action = dialog.selected_action()
+        if not action:
+            return
         if node.kind == "customer":
             self.customer_follow_up_action_requested.emit(node.customer_name, action)
         else:
@@ -1035,7 +1065,8 @@ def _follow_up_nodes_for_projects(records: list[ProjectRecord]) -> list[FollowUp
         next_action = _visible_next_action(record.next_action)
         if _is_inactive_stage(record.stage):
             continue
-        if not next_action and not record.next_follow_up_date:
+        body = next_action or _fallback_project_follow_up_body(record)
+        if not body and not record.next_follow_up_date:
             continue
         group, sort_key = _follow_up_group(record.next_follow_up_date)
         nodes.append(
@@ -1044,7 +1075,7 @@ def _follow_up_nodes_for_projects(records: list[ProjectRecord]) -> list[FollowUp
                 title=f"{record.brand_customer_name} · {record.project_name}",
                 customer_name=record.brand_customer_name,
                 project_name=record.project_name,
-                body=next_action or record.current_focus or "待补项目下一步",
+                body=body or "待补项目下一步",
                 meta=f"{record.project_type or '项目'} · {record.stage or '待补状态'} · 最新审批：{record.latest_approval_status or '暂无审批记录'}",
                 tag="项目节点",
                 follow_up_date=record.next_follow_up_date,
@@ -1053,6 +1084,12 @@ def _follow_up_nodes_for_projects(records: list[ProjectRecord]) -> list[FollowUp
             )
         )
     return nodes
+
+
+def _fallback_project_follow_up_body(record: ProjectRecord) -> str:
+    if _is_internal_main_work_project(record):
+        return (record.current_focus or "").strip()
+    return ""
 
 
 def _compact_sidebar_title(node: FollowUpNode) -> str:
@@ -1084,6 +1121,89 @@ def _follow_up_chip_text(value: str, group: str) -> str:
     if parsed == today + timedelta(days=1):
         return "明天"
     return f"{parsed.month}-{parsed.day}"
+
+
+def _reschedule_shortcuts(today: date) -> list[tuple[str, str]]:
+    return [
+        ("今天", today.isoformat()),
+        ("明天", (today + timedelta(days=1)).isoformat()),
+        ("后天", (today + timedelta(days=2)).isoformat()),
+        ("下周一", _next_weekday_of_next_week(today, 0).isoformat()),
+        ("下周三", _next_weekday_of_next_week(today, 2).isoformat()),
+        ("下周五", _next_weekday_of_next_week(today, 4).isoformat()),
+    ]
+
+
+def _next_weekday_of_next_week(current: date, weekday: int) -> date:
+    start_of_next_week = current + timedelta(days=(7 - current.weekday()))
+    return start_of_next_week + timedelta(days=weekday)
+
+
+class FollowUpRescheduleDialog(QDialog):
+    def __init__(self, current_text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._selected_action = ""
+        self.setWindowTitle("改排期")
+        self.setModal(True)
+        self.resize(420, 0)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        hint = QLabel("直接点一个排期就行，也可以自己挑日期。")
+        hint.setObjectName("SectionHint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        shortcut_grid = QGridLayout()
+        shortcut_grid.setHorizontalSpacing(8)
+        shortcut_grid.setVerticalSpacing(8)
+        today = date.today()
+        for index, (label, iso_value) in enumerate(_reschedule_shortcuts(today)):
+            button = QPushButton(label)
+            button.setObjectName("InlineActionButton")
+            button.clicked.connect(lambda _checked=False, value=iso_value: self._accept_action(f"reschedule:{value}"))
+            shortcut_grid.addWidget(button, index // 3, index % 3)
+        layout.addLayout(shortcut_grid)
+
+        custom_row = QHBoxLayout()
+        custom_label = QLabel("自定义日期")
+        custom_label.setMinimumWidth(72)
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        if current_text:
+            try:
+                initial = date.fromisoformat(current_text)
+            except ValueError:
+                initial = today
+        else:
+            initial = today
+        self.date_edit.setDate(QDate(initial.year, initial.month, initial.day))
+        custom_row.addWidget(custom_label)
+        custom_row.addWidget(self.date_edit, 1)
+        layout.addLayout(custom_row)
+
+        button_box = QDialogButtonBox()
+        use_date_button = button_box.addButton("使用这个日期", QDialogButtonBox.ButtonRole.AcceptRole)
+        unschedule_button = button_box.addButton("改成待排期", QDialogButtonBox.ButtonRole.ActionRole)
+        cancel_button = button_box.addButton(QDialogButtonBox.StandardButton.Cancel)
+        use_date_button.clicked.connect(self._accept_selected_date)
+        unschedule_button.clicked.connect(lambda: self._accept_action("unschedule"))
+        cancel_button.clicked.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def selected_action(self) -> str:
+        return self._selected_action
+
+    def _accept_selected_date(self) -> None:
+        chosen = self.date_edit.date().toPython()
+        self._accept_action(f"reschedule:{chosen.isoformat()}")
+
+    def _accept_action(self, action: str) -> None:
+        self._selected_action = action
+        self.accept()
 
 
 def _is_editable_follow_up_date(value: str) -> bool:
@@ -1164,7 +1284,7 @@ def _follow_up_group(value: str) -> tuple[str, int]:
     parsed = _parse_iso_date(value)
     today = date.today()
     if parsed is None:
-        return "待排期", 50
+        return "待排期", 60
     if parsed < today:
         return "逾期", 0
     if parsed == today:
@@ -1174,7 +1294,7 @@ def _follow_up_group(value: str) -> tuple[str, int]:
     end_of_week = today + timedelta(days=6 - today.weekday())
     if parsed <= end_of_week:
         return "本周稍后", 30
-    return "待排期", 50
+    return "后续排期", 40
 
 
 def _group_title(group: str) -> str:
@@ -1195,6 +1315,8 @@ def _group_accent_color(group: str) -> str:
         return "#2f6feb"
     if group == "本周稍后":
         return "#3f8f63"
+    if group == "后续排期":
+        return "#6f86b5"
     return "#9b8d7b"
 
 
@@ -1217,6 +1339,14 @@ def _reverse_date_key(value: str) -> int:
 
 def _is_inactive_stage(stage: str) -> bool:
     return stage in {"暂缓", "已归档"}
+
+
+def _is_internal_main_work_project(record: ProjectRecord) -> bool:
+    return _is_internal_main_work_customer_name(record.brand_customer_name)
+
+
+def _is_internal_main_work_customer_name(value: str) -> bool:
+    return (value or "").strip() == INTERNAL_MAIN_WORK_CUSTOMER_NAME
 
 
 def _sortable_updated_at(value: str) -> str:

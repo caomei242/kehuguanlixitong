@@ -122,6 +122,7 @@ class SettingsPage(QWidget):
 
         self.customer_root_edit = QLineEdit()
         self.project_root_edit = QLineEdit()
+        self.person_root_edit = QLineEdit()
         self.main_work_root_edit = QLineEdit()
         self.approval_inbox_root_edit = QLineEdit()
         self.minimax_api_key_edit = QLineEdit()
@@ -133,6 +134,7 @@ class SettingsPage(QWidget):
         for editor in (
             self.customer_root_edit,
             self.project_root_edit,
+            self.person_root_edit,
             self.main_work_root_edit,
             self.approval_inbox_root_edit,
             self.minimax_api_key_edit,
@@ -144,6 +146,7 @@ class SettingsPage(QWidget):
 
         path_form.addRow("客户管理根路径", self.customer_root_edit)
         path_form.addRow("项目数据根路径", self.project_root_edit)
+        path_form.addRow("人员数据根路径", self.person_root_edit)
         path_form.addRow("主业文件根路径", self.main_work_root_edit)
         path_form.addRow("钉钉审批导入箱", self.approval_inbox_root_edit)
         path_layout.addLayout(path_form)
@@ -228,6 +231,7 @@ class SettingsPage(QWidget):
         self,
         customer_root: str,
         project_root: str,
+        person_root: str,
         main_work_root: str,
         approval_inbox_root: str = "",
         minimax_api_key: str = "",
@@ -238,6 +242,7 @@ class SettingsPage(QWidget):
     ) -> None:
         self.customer_root_edit.setText(customer_root)
         self.project_root_edit.setText(project_root)
+        self.person_root_edit.setText(person_root)
         self.main_work_root_edit.setText(main_work_root)
         self.approval_inbox_root_edit.setText(approval_inbox_root)
         self.minimax_api_key_edit.setText(minimax_api_key)
@@ -254,6 +259,7 @@ class SettingsPage(QWidget):
             {
                 "customer_root": self.customer_root_edit.text().strip(),
                 "project_root": self.project_root_edit.text().strip(),
+                "person_root": self.person_root_edit.text().strip(),
                 "main_work_root": self.main_work_root_edit.text().strip(),
                 "approval_inbox_root": self.approval_inbox_root_edit.text().strip(),
                 "ai_provider": "minimax",

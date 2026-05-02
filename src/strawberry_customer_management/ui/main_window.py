@@ -38,12 +38,26 @@ from strawberry_customer_management.config import ConfigStore
 from strawberry_customer_management.config import resolved_minimax_api_key
 from strawberry_customer_management.mcp_ocr_client import DEFAULT_MCP_COMMAND, McpOCRClient
 from strawberry_customer_management.markdown_store import MarkdownCustomerStore
-from strawberry_customer_management.models import CommunicationEntry, CustomerDetail, CustomerDraft, PartyAInfo, ProjectDetail, ProjectDraft
+from strawberry_customer_management.models import (
+    CaptureDraft,
+    CommunicationEntry,
+    CustomerDetail,
+    CustomerDraft,
+    INTERNAL_MAIN_WORK_NAME,
+    PartyAInfo,
+    PersonDraft,
+    PersonProjectLink,
+    ProjectDetail,
+    ProjectDraft,
+    ProjectRole,
+)
+from strawberry_customer_management.person_store import MarkdownPersonStore
 from strawberry_customer_management.project_discovery import DesktopProjectDiscoveryService
 from strawberry_customer_management.project_store import MarkdownProjectStore
 from strawberry_customer_management.ui.app_icon import load_app_icon
 from strawberry_customer_management.ui.pages.overview_page import OverviewPage
 from strawberry_customer_management.ui.pages.customer_library_page import CustomerLibraryPage
+from strawberry_customer_management.ui.pages.person_library_page import PersonLibraryPage
 from strawberry_customer_management.ui.pages.project_management_page import ProjectManagementPage
 from strawberry_customer_management.ui.pages.quick_capture_page import QuickCapturePage
 from strawberry_customer_management.ui.pages.settings_page import SettingsPage
@@ -70,7 +84,7 @@ class AICaptureWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            draft = self.client.extract_draft(
+            draft = self.client.extract_capture(
                 self.raw_text,
                 existing_customers=self.existing_customers,
                 target_customer_name=self.target_customer_name or None,
@@ -121,11 +135,18 @@ class FollowUpUndoState:
 class MainWindow(QMainWindow):
     _NAV_ITEMS: tuple[tuple[str, str], ...] = (
         ("客户总览", "本周跟进"),
+        ("项目管理", "项目与审批"),
+        ("关系人库", "人员关系"),
         ("客户库", "全部客户"),
         ("快速录入", "新增与更新"),
-        ("项目管理", "项目与审批"),
         ("设置", "系统配置"),
     )
+    OVERVIEW_ROW = 0
+    PROJECTS_ROW = 1
+    PERSON_LIBRARY_ROW = 2
+    CUSTOMER_LIBRARY_ROW = 3
+    QUICK_CAPTURE_ROW = 4
+    SETTINGS_ROW = 5
 
     def __init__(self, config_store: ConfigStore) -> None:
         super().__init__()
@@ -137,6 +158,7 @@ class MainWindow(QMainWindow):
         self._config = self._config_store.load()
         self._store = MarkdownCustomerStore(Path(self._config["customer_root"]))
         self._project_store = MarkdownProjectStore(Path(self._config["project_root"]))
+        self._person_store = MarkdownPersonStore(Path(self._config["person_root"]))
         self._approval_inbox_scanner = ApprovalInboxScanner(Path(self._config["approval_inbox_root"]))
         self._approval_import_source_files: list[ApprovalInboxFile] = []
         self._ai_thread: QThread | None = None
@@ -157,22 +179,24 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget()
         self.overview_page = OverviewPage()
+        self.project_management_page = ProjectManagementPage()
+        self.person_library_page = PersonLibraryPage()
         self.customer_library_page = CustomerLibraryPage()
         self.quick_capture_page = QuickCapturePage()
-        self.project_management_page = ProjectManagementPage()
         self.settings_page = SettingsPage()
         self.stack.addWidget(self.overview_page)
+        self.stack.addWidget(self.project_management_page)
+        self.stack.addWidget(self.person_library_page)
         self.stack.addWidget(self.customer_library_page)
         self.stack.addWidget(self.quick_capture_page)
-        self.stack.addWidget(self.project_management_page)
         self.stack.addWidget(self.settings_page)
 
         self.overview_page.customer_selected.connect(self._show_customer)
         self.overview_page.update_customer_requested.connect(self._prepare_existing_customer_update)
         self.overview_page.edit_customer_requested.connect(self._prepare_existing_customer_edit)
         self.overview_page.view_customer_projects_requested.connect(self._focus_customer_projects)
-        self.overview_page.quick_capture_requested.connect(lambda: self.nav.setCurrentRow(2))
-        self.overview_page.customer_library_requested.connect(lambda: self.nav.setCurrentRow(1))
+        self.overview_page.quick_capture_requested.connect(lambda: self.nav.setCurrentRow(self.QUICK_CAPTURE_ROW))
+        self.overview_page.customer_library_requested.connect(lambda: self.nav.setCurrentRow(self.CUSTOMER_LIBRARY_ROW))
         self.overview_page.customer_follow_up_action_requested.connect(self._handle_customer_follow_up_action)
         self.overview_page.project_follow_up_action_requested.connect(self._handle_project_follow_up_action)
         self.overview_page.undo_last_follow_up_action_requested.connect(self._undo_last_follow_up_action)
@@ -181,8 +205,13 @@ class MainWindow(QMainWindow):
         self.customer_library_page.edit_customer_requested.connect(self._prepare_existing_customer_edit)
         self.customer_library_page.archive_customer_requested.connect(lambda name: self._handle_customer_follow_up_action(name, "archive"))
         self.customer_library_page.view_customer_projects_requested.connect(self._focus_customer_projects)
-        self.customer_library_page.overview_requested.connect(lambda: self.nav.setCurrentRow(0))
-        self.customer_library_page.quick_capture_requested.connect(lambda: self.nav.setCurrentRow(2))
+        self.customer_library_page.person_selected.connect(self._focus_person)
+        self.customer_library_page.overview_requested.connect(lambda: self.nav.setCurrentRow(self.OVERVIEW_ROW))
+        self.customer_library_page.quick_capture_requested.connect(lambda: self.nav.setCurrentRow(self.QUICK_CAPTURE_ROW))
+        self.person_library_page.person_selected.connect(self._show_person)
+        self.person_library_page.save_requested.connect(self._handle_person_save)
+        self.person_library_page.overview_requested.connect(lambda: self.nav.setCurrentRow(self.OVERVIEW_ROW))
+        self.person_library_page.quick_capture_requested.connect(lambda: self.nav.setCurrentRow(self.QUICK_CAPTURE_ROW))
         self.quick_capture_page.ai_extract_requested.connect(self._handle_ai_extract)
         self.quick_capture_page.screenshot_ocr_requested.connect(self._handle_screenshot_ocr)
         self.quick_capture_page.save_requested.connect(self._handle_capture_save)
@@ -194,6 +223,7 @@ class MainWindow(QMainWindow):
         self.project_management_page.approval_import_ocr_requested.connect(self._handle_approval_import_ocr)
         self.project_management_page.approval_inbox_scan_requested.connect(self._handle_approval_inbox_scan)
         self.project_management_page.approval_inbox_files_dropped.connect(self._handle_approval_inbox_files_dropped)
+        self.project_management_page.person_selected.connect(self._focus_person)
         self.settings_page.save_requested.connect(self._handle_settings_save)
         self.settings_page.refresh_requested.connect(self._handle_settings_refresh)
         self.settings_page.validate_requested.connect(self._handle_settings_validate)
@@ -242,37 +272,8 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(18, 18, 18, 18)
         sidebar_layout.setSpacing(14)
         sidebar_layout.addWidget(brand_card)
+        sidebar_layout.addSpacing(10)
         sidebar_layout.addWidget(nav_card, 1)
-        profile_card = QFrame()
-        profile_card.setObjectName("SidebarProfileCard")
-        profile_layout = QVBoxLayout(profile_card)
-        profile_layout.setContentsMargins(14, 14, 14, 14)
-        profile_layout.setSpacing(10)
-        profile_top = QHBoxLayout()
-        profile_top.setContentsMargins(0, 0, 0, 0)
-        profile_top.setSpacing(10)
-        profile_avatar = QLabel("莓")
-        profile_avatar.setObjectName("SidebarAvatar")
-        profile_meta = QVBoxLayout()
-        profile_meta.setContentsMargins(0, 0, 0, 0)
-        profile_meta.setSpacing(2)
-        profile_name = QLabel("草莓工作台")
-        profile_name.setObjectName("SidebarProfileName")
-        profile_role = QLabel("")
-        profile_role.setObjectName("SidebarProfileRole")
-        profile_meta.addWidget(profile_name)
-        profile_meta.addWidget(profile_role)
-        profile_top.addWidget(profile_avatar, 0, Qt.AlignmentFlag.AlignTop)
-        profile_top.addLayout(profile_meta, 1)
-        profile_badge = QLabel("已连接主业资料库")
-        profile_badge.setObjectName("SidebarProfileBadge")
-        profile_meta_line = QLabel("")
-        profile_meta_line.setWordWrap(True)
-        profile_meta_line.setObjectName("SidebarProfileMeta")
-        profile_layout.addLayout(profile_top)
-        profile_layout.addWidget(profile_badge)
-        profile_layout.addWidget(profile_meta_line)
-        sidebar_layout.addWidget(profile_card)
 
         content = QFrame()
         content.setObjectName("WindowContentShell")
@@ -302,6 +303,7 @@ class MainWindow(QMainWindow):
         self.settings_page.set_values(
             self._config["customer_root"],
             self._config["project_root"],
+            self._config["person_root"],
             self._config["main_work_root"],
             str(self._config.get("approval_inbox_root", "")),
             self._config.get("minimax_api_key", ""),
@@ -312,9 +314,10 @@ class MainWindow(QMainWindow):
         )
         self._apply_option_config()
         self.project_management_page.set_approval_inbox_path(str(self._config.get("approval_inbox_root", "")))
-        self.nav.setCurrentRow(0)
+        self.nav.setCurrentRow(self.OVERVIEW_ROW)
         self._reload_customers()
         self._reload_projects()
+        self._reload_people()
 
     def _populate_navigation(self) -> None:
         for index, (title, subtitle) in enumerate(self._NAV_ITEMS, start=1):
@@ -389,6 +392,10 @@ class MainWindow(QMainWindow):
         else:
             self.project_management_page.set_project_detail(None)
 
+    def _reload_people(self, selected_name: str | None = None) -> None:
+        records = self._person_store.list_people()
+        self.person_library_page.set_people(records, selected_name=selected_name)
+
     def _show_customer(self, name: str) -> None:
         try:
             detail = self._store.get_customer(name)
@@ -404,8 +411,10 @@ class MainWindow(QMainWindow):
             detail = self._store.get_customer(name)
         except KeyError:
             self.customer_library_page.show_customer_detail(None)
+            self.customer_library_page.set_related_people([])
             return
         self.customer_library_page.show_customer_detail(detail)
+        self.customer_library_page.set_related_people(self._person_store.list_people_for_customer(detail.name))
 
     def _show_project(self, brand_customer_name: str, project_name: str) -> None:
         try:
@@ -415,8 +424,30 @@ class MainWindow(QMainWindow):
             return
         self.project_management_page.set_project_detail(detail)
 
+    def _show_person(self, name: str) -> None:
+        try:
+            detail = self._person_store.get_person(name)
+        except KeyError:
+            self.person_library_page.show_person_detail(None)
+            return
+        self.person_library_page.show_person_detail(detail)
+
+    def _handle_person_save(self, draft: PersonDraft) -> None:
+        if not draft.name:
+            QMessageBox.warning(self, "缺少人名", "请先选择一个关系人。")
+            return
+        detail = self._person_store.upsert_person(draft)
+        self._reload_people(selected_name=detail.name)
+        selected_customer = getattr(self.customer_library_page, "_current_customer_name", "")
+        if selected_customer:
+            self.customer_library_page.set_related_people(self._person_store.list_people_for_customer(selected_customer))
+
+    def _focus_person(self, name: str) -> None:
+        self.nav.setCurrentRow(self.PERSON_LIBRARY_ROW)
+        self._reload_people(selected_name=name)
+
     def _focus_customer_projects(self, customer_name: str) -> None:
-        self.nav.setCurrentRow(3)
+        self.nav.setCurrentRow(self.PROJECTS_ROW)
         self.project_management_page.focus_brand(customer_name)
         active_key = self.project_management_page.selected_project_key()
         if active_key:
@@ -439,6 +470,9 @@ class MainWindow(QMainWindow):
             next_action = " "
             recent_progress = "已完成本次跟进"
             summary = "已完成本次跟进"
+        elif action == "today":
+            next_follow_up_date = date.today().isoformat()
+            summary = f"已改期到 {next_follow_up_date}"
         elif action.startswith("reschedule:"):
             next_follow_up_date = action.split(":", 1)[1].strip()
             summary = f"已改期到 {next_follow_up_date}"
@@ -500,6 +534,10 @@ class MainWindow(QMainWindow):
             next_action = " "
             notes = _append_note(notes, f"- {today}：已完成本次项目跟进。")
             action_label = "已完成本次项目跟进"
+        elif action == "today":
+            next_follow_up_date = date.today().isoformat()
+            notes = _append_note(notes, f"- {today}：项目跟进已改期到 {next_follow_up_date}。")
+            action_label = f"已改到 {next_follow_up_date}"
         elif action.startswith("reschedule:"):
             next_follow_up_date = action.split(":", 1)[1].strip()
             notes = _append_note(notes, f"- {today}：项目跟进已改期到 {next_follow_up_date}。")
@@ -566,7 +604,24 @@ class MainWindow(QMainWindow):
         )
         self._reload_projects(selected_brand=updated.brand_customer_name, selected_project=(updated.brand_customer_name, updated.project_name))
 
-    def _handle_capture_save(self, draft: CustomerDraft) -> None:
+    def _handle_capture_save(self, draft: object) -> None:
+        if isinstance(draft, ProjectDraft):
+            self._handle_project_save(draft)
+            self.quick_capture_page.set_status(f"项目/事项「{draft.project_name}」已写入 Obsidian 项目工作台。")
+            self.nav.setCurrentRow(self.PROJECTS_ROW)
+            return
+        if isinstance(draft, CaptureDraft):
+            if draft.project_draft is not None:
+                self._handle_capture_save(draft.project_draft)
+                return
+            if draft.customer_draft is not None:
+                draft = draft.customer_draft
+            else:
+                QMessageBox.warning(self, "缺少录入内容", "AI 没有返回可保存的客户或项目草稿。")
+                return
+        if not isinstance(draft, CustomerDraft):
+            QMessageBox.warning(self, "录入类型不支持", "当前录入内容不是可保存的客户或项目草稿。")
+            return
         if not draft.name:
             QMessageBox.warning(self, "缺少客户名", "请先填写客户名称。")
             return
@@ -581,7 +636,7 @@ class MainWindow(QMainWindow):
         self._reload_customers(selected_name=detail.name)
         self._reload_projects(selected_brand=detail.name)
         self.quick_capture_page.set_status(f"{detail.name} 已写入 Obsidian 客户管理工作台。")
-        self.nav.setCurrentRow(0)
+        self.nav.setCurrentRow(self.OVERVIEW_ROW)
 
     def _handle_project_save(self, draft: ProjectDraft) -> None:
         if not draft.brand_customer_name or not draft.project_name:
@@ -612,7 +667,7 @@ class MainWindow(QMainWindow):
             next_action=draft.next_action,
             next_follow_up_date=draft.next_follow_up_date,
             risk=draft.risk,
-            customer_page_link=draft.customer_page_link or f"[[客户/客户--{draft.brand_customer_name}]]",
+            customer_page_link=draft.customer_page_link or ("" if draft.brand_customer_name == INTERNAL_MAIN_WORK_NAME else f"[[客户/客户--{draft.brand_customer_name}]]"),
             main_work_path=draft.main_work_path,
             path_status="主业路径有效" if draft.main_work_path and Path(draft.main_work_path).exists() else "主业路径失效",
             party_a_source=draft.party_a_source,
@@ -638,7 +693,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "原项目不存在", f"没有找到原项目「{exc.args[0]}」，请刷新后重试。")
             return
         self._reload_projects(selected_brand=detail.brand_customer_name, selected_project=(detail.brand_customer_name, detail.project_name))
-        if self.overview_page is not None and self.overview_page:
+        self._sync_people_from_project(detail)
+        self._reload_people()
+        if detail.brand_customer_name != INTERNAL_MAIN_WORK_NAME and self.overview_page is not None and self.overview_page:
             self._show_customer(detail.brand_customer_name)
         self.project_management_page.set_status(f"项目「{detail.project_name}」已写入 Obsidian 项目工作台。")
 
@@ -721,13 +778,15 @@ class MainWindow(QMainWindow):
                         latest_approval_status=project_draft.latest_approval_status,
                         updated_at=project_draft.updated_at,
                     )
-                    self._project_store.upsert_discovered_project(refreshed_draft)
+                    synced_detail = self._project_store.upsert_discovered_project(refreshed_draft)
+                    self._sync_people_from_project(synced_detail)
                     synced_projects += 1
                     selected_customer = detail.name
         finally:
             self.project_management_page.set_sync_busy(False)
         self._reload_customers(selected_name=selected_customer or None)
         self._reload_projects(selected_brand=self.project_management_page.selected_brand() or selected_customer)
+        self._reload_people()
         self.project_management_page.set_status(f"已同步 {synced_projects} 个项目，修正 {repaired_customers} 个客户主业路径。")
 
     def _handle_approval_import_preview(self, raw_text: str) -> None:
@@ -903,7 +962,7 @@ class MainWindow(QMainWindow):
         api_key = resolved_minimax_api_key(self._config)
         if not api_key:
             QMessageBox.warning(self, "缺少 MiniMax Key", "请先在设置页填写 MiniMax API Key，或设置 MINIMAX_API_KEY 环境变量。")
-            self.nav.setCurrentRow(4)
+            self.nav.setCurrentRow(self.SETTINGS_ROW)
             return
 
         client = McpOCRClient(
@@ -952,7 +1011,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "客户不存在", f"没有找到客户「{name}」。")
             return
         self.quick_capture_page.prepare_existing_customer_update(detail)
-        self.nav.setCurrentRow(2)
+        self.nav.setCurrentRow(self.QUICK_CAPTURE_ROW)
 
     def _prepare_existing_customer_edit(self, name: str) -> None:
         try:
@@ -961,7 +1020,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "客户不存在", f"没有找到客户「{name}」。")
             return
         self.quick_capture_page.prepare_manual_customer_edit(detail)
-        self.nav.setCurrentRow(2)
+        self.nav.setCurrentRow(self.QUICK_CAPTURE_ROW)
 
     def _handle_ai_extract(self, raw_text: str, target_customer_name: str = "") -> None:
         if not raw_text:
@@ -973,7 +1032,7 @@ class MainWindow(QMainWindow):
         api_key = resolved_minimax_api_key(self._config)
         if not api_key:
             QMessageBox.warning(self, "缺少 MiniMax Key", "请先在设置页填写 MiniMax API Key，或设置 MINIMAX_API_KEY 环境变量。")
-            self.nav.setCurrentRow(4)
+            self.nav.setCurrentRow(self.SETTINGS_ROW)
             return
         client = MiniMaxCaptureClient(
             api_key=api_key,
@@ -1017,7 +1076,7 @@ class MainWindow(QMainWindow):
         api_key = resolved_minimax_api_key(self._config)
         if not api_key:
             QMessageBox.warning(self, "缺少 MiniMax Key", "请先在设置页填写 MiniMax API Key，或设置 MINIMAX_API_KEY 环境变量。")
-            self.nav.setCurrentRow(4)
+            self.nav.setCurrentRow(self.SETTINGS_ROW)
             return
 
         client = McpOCRClient(
@@ -1042,9 +1101,16 @@ class MainWindow(QMainWindow):
         thread.start()
 
     @Slot(object)
-    def _handle_ai_extract_success(self, draft: CustomerDraft) -> None:
+    def _handle_ai_extract_success(self, draft: object) -> None:
+        if isinstance(draft, CaptureDraft):
+            if draft.project_draft is not None:
+                self.quick_capture_page.apply_draft(draft.project_draft)
+                self.quick_capture_page.set_status("AI 已整理为项目/主业事项。请确认字段后，再保存项目/事项。")
+                return
+            if draft.customer_draft is not None:
+                draft = draft.customer_draft
         self.quick_capture_page.apply_draft(draft)
-        self.quick_capture_page.set_status("AI 已整理到表单。请确认字段后，再保存并更新客户。")
+        self.quick_capture_page.set_status("AI 已整理到表单。请确认字段后，再保存录入。")
 
     @Slot(str)
     def _handle_ai_extract_failure(self, message: str) -> None:
@@ -1080,6 +1146,7 @@ class MainWindow(QMainWindow):
         self._config_store.save(self._config)
         self._store = MarkdownCustomerStore(Path(self._config["customer_root"]))
         self._project_store = MarkdownProjectStore(Path(self._config["project_root"]))
+        self._person_store = MarkdownPersonStore(Path(self._config["person_root"]))
         self._approval_inbox_scanner = ApprovalInboxScanner(Path(self._config["approval_inbox_root"]))
         self.project_management_page.set_approval_inbox_path(str(self._config["approval_inbox_root"]))
         self._apply_option_config()
@@ -1087,15 +1154,18 @@ class MainWindow(QMainWindow):
         self.settings_page.set_status(f"设置已保存。当前 MiniMax 口径：{route_label}；分类选项已刷新。")
         self._reload_customers()
         self._reload_projects()
+        self._reload_people()
 
     def _handle_settings_refresh(self) -> None:
         self._reload_customers()
         self._reload_projects()
-        self.settings_page.set_status("已按当前设置重新加载客户和项目数据。")
+        self._reload_people()
+        self.settings_page.set_status("已按当前设置重新加载客户、项目和人员数据。")
 
     def _handle_settings_validate(self) -> None:
         customer_root = Path(self.settings_page.customer_root_edit.text().strip())
         project_root = Path(self.settings_page.project_root_edit.text().strip())
+        person_root = Path(self.settings_page.person_root_edit.text().strip())
         main_work_root = Path(self.settings_page.main_work_root_edit.text().strip())
         approval_inbox_root = Path(self.settings_page.approval_inbox_root_edit.text().strip())
         current_minimax_key = self.settings_page.minimax_api_key_edit.text().strip() or resolved_minimax_api_key(self._config)
@@ -1105,6 +1175,7 @@ class MainWindow(QMainWindow):
         messages = [
             f"客户管理路径：{'存在' if customer_root.exists() else '不存在'}",
             f"项目数据路径：{'存在' if project_root.exists() else '不存在'}",
+            f"人员数据路径：{'存在' if person_root.exists() else '不存在'}",
             f"主业文件根路径：{'存在' if main_work_root.exists() else '不存在'}",
             f"钉钉审批导入箱：{'存在' if approval_inbox_root.exists() else '不存在'}",
             f"MiniMax Key：{'已配置' if current_minimax_key else '未配置'}",
@@ -1121,6 +1192,37 @@ class MainWindow(QMainWindow):
         self.quick_capture_page.set_option_lists(customer_types, secondary_tags)
         self.overview_page.set_customer_type_options(customer_types)
         self.customer_library_page.set_customer_type_options(customer_types)
+
+    def _sync_people_from_project(self, detail: ProjectDetail) -> None:
+        if not detail.participant_roles:
+            return
+        synced_name = ""
+        for role in detail.participant_roles:
+            if not role.name.strip():
+                continue
+            person = self._person_store.upsert_person(
+                PersonDraft(
+                    name=role.name.strip(),
+                    gender="待判断",
+                    side=role.display_side,
+                    brand="" if detail.brand_customer_name == INTERNAL_MAIN_WORK_NAME else detail.brand_customer_name,
+                    common_relation=role.display_relation,
+                    linked_customers=[] if detail.brand_customer_name == INTERNAL_MAIN_WORK_NAME else [detail.brand_customer_name],
+                    project_links=[
+                        PersonProjectLink(
+                            customer_name=detail.brand_customer_name,
+                            project_name=detail.project_name,
+                            side=role.display_side,
+                            relation=role.display_relation,
+                            note=role.note,
+                        )
+                    ],
+                    updated_at=detail.updated_at,
+                )
+            )
+            synced_name = person.name
+        if synced_name:
+            self._reload_people(selected_name=synced_name)
 
     @staticmethod
     def _customer_draft_from_detail(detail: CustomerDetail, **overrides: str) -> CustomerDraft:

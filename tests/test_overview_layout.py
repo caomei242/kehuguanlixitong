@@ -9,11 +9,31 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QComboBox, QFrame, QPushButton, QLabel, QSizePolicy
 
 from strawberry_customer_management.models import CustomerRecord, ProjectRecord
-from strawberry_customer_management.ui.pages.overview_page import OverviewPage, _sort_customer_records
+from strawberry_customer_management.ui.pages.overview_page import (
+    CUSTOMER_ITEMS_SCOPE_FILTER,
+    INTERNAL_ITEMS_SCOPE_FILTER,
+    OverviewPage,
+    _reschedule_shortcuts,
+    _sort_customer_records,
+)
 
 
 def _app() -> QApplication:
     return QApplication.instance() or QApplication([])
+
+
+class _FakeRescheduleDialog:
+    action = ""
+
+    def __init__(self, current_text: str = "", parent=None) -> None:
+        self.current_text = current_text
+        self.parent = parent
+
+    def exec(self) -> int:
+        return 1
+
+    def selected_action(self) -> str:
+        return self.action
 
 
 def test_customer_records_sort_latest_first_with_placeholder_dates_last() -> None:
@@ -37,6 +57,7 @@ def test_overview_workspace_keeps_primary_regions_compact() -> None:
     assert page.overview_panel.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Maximum
     assert page.follow_panel.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Maximum
     assert page.missing_panel.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Maximum
+    assert page.detail_card.isHidden()
     assert page.detail_browser.maximumHeight() <= 300
 
 
@@ -166,6 +187,217 @@ def test_overview_timeline_due_chip_uses_relative_text_for_tomorrow() -> None:
     assert due_chip.text() == "明天"
 
 
+def test_overview_splits_future_scheduled_items_from_unscheduled() -> None:
+    _app()
+    page = OverviewPage()
+    next_week = (date.today() + timedelta(days=7)).isoformat()
+    page.set_customers(
+        [
+            CustomerRecord(
+                name="排到下周的客户",
+                customer_type="品牌客户",
+                stage="沟通中",
+                next_action="下周继续推进",
+                next_follow_up_date=next_week,
+                updated_at="2026-04-30",
+            ),
+            CustomerRecord(
+                name="还没定日期的客户",
+                customer_type="品牌客户",
+                stage="沟通中",
+                next_action="先确认是否继续推进",
+                updated_at="2026-04-30",
+            ),
+        ]
+    )
+
+    assert page.metric_value_labels["后续排期"].text() == "1"
+    assert page.metric_value_labels["待排期"].text() == "1"
+    assert any(label.text() == "后续排期" for label in page.findChildren(QLabel))
+    page.close()
+
+
+def test_overview_scope_filter_defaults_to_all_items_including_internal_projects() -> None:
+    _app()
+    page = OverviewPage()
+    today = date.today().isoformat()
+    page.set_customers(
+        [
+            CustomerRecord(
+                name="爱慕",
+                customer_type="品牌客户",
+                stage="沟通中",
+                next_action="确认客户拍摄排期",
+                next_follow_up_date=today,
+                updated_at=today,
+            )
+        ]
+    )
+    page.set_follow_up_projects(
+        [
+            ProjectRecord(
+                brand_customer_name="爱慕",
+                project_name="客户夏季拍摄项目",
+                stage="推进中",
+                year="2026",
+                project_type="合同项目",
+                next_action="整理客户拍摄清单",
+                next_follow_up_date=today,
+                updated_at=today,
+            ),
+            ProjectRecord(
+                brand_customer_name="草莓主业",
+                project_name="内部素材库整理",
+                stage="推进中",
+                year="2026",
+                project_type="内部事项",
+                next_action="补齐内部素材归档规则",
+                next_follow_up_date=today,
+                updated_at=today,
+            ),
+        ]
+    )
+
+    assert set(page.displayed_follow_up_titles()) == {
+        "爱慕",
+        "爱慕 · 客户夏季拍摄项目",
+        "草莓主业 · 内部素材库整理",
+    }
+    assert page.metric_value_labels["今天"].text() == "3"
+    assert page.filter_badge_label.text() == "筛选：全部事项 / 全部客户"
+    page.close()
+
+
+def test_overview_scope_filter_customer_related_hides_internal_projects() -> None:
+    _app()
+    page = OverviewPage()
+    today = date.today().isoformat()
+    page.set_customers(
+        [
+            CustomerRecord(
+                name="爱慕",
+                customer_type="品牌客户",
+                stage="沟通中",
+                next_action="确认客户拍摄排期",
+                next_follow_up_date=today,
+                updated_at=today,
+            )
+        ]
+    )
+    page.set_follow_up_projects(
+        [
+            ProjectRecord(
+                brand_customer_name="爱慕",
+                project_name="客户夏季拍摄项目",
+                stage="推进中",
+                year="2026",
+                project_type="合同项目",
+                next_action="整理客户拍摄清单",
+                next_follow_up_date=today,
+                updated_at=today,
+            ),
+            ProjectRecord(
+                brand_customer_name="草莓主业",
+                project_name="内部素材库整理",
+                stage="推进中",
+                year="2026",
+                project_type="内部事项",
+                next_action="补齐内部素材归档规则",
+                next_follow_up_date=today,
+                updated_at=today,
+            ),
+        ]
+    )
+    page.scope_filter_combo.setCurrentText(CUSTOMER_ITEMS_SCOPE_FILTER)
+
+    assert set(page.displayed_follow_up_titles()) == {"爱慕", "爱慕 · 客户夏季拍摄项目"}
+    assert page.metric_value_labels["今天"].text() == "2"
+    assert page.filter_badge_label.text() == "筛选：客户相关 / 全部客户"
+    page.close()
+
+
+def test_overview_scope_filter_internal_main_work_only_shows_internal_projects() -> None:
+    _app()
+    page = OverviewPage()
+    today = date.today().isoformat()
+    captured_customers: list[str] = []
+    page.customer_selected.connect(captured_customers.append)
+    page.set_customers(
+        [
+            CustomerRecord(
+                name="爱慕",
+                customer_type="品牌客户",
+                stage="沟通中",
+                next_action="确认客户拍摄排期",
+                next_follow_up_date=today,
+                updated_at=today,
+            )
+        ]
+    )
+    page.set_follow_up_projects(
+        [
+            ProjectRecord(
+                brand_customer_name="爱慕",
+                project_name="客户夏季拍摄项目",
+                stage="推进中",
+                year="2026",
+                project_type="合同项目",
+                next_action="整理客户拍摄清单",
+                next_follow_up_date=today,
+                updated_at=today,
+            ),
+            ProjectRecord(
+                brand_customer_name="草莓主业",
+                project_name="内部素材库整理",
+                stage="推进中",
+                year="2026",
+                project_type="内部事项",
+                next_action="补齐内部素材归档规则",
+                next_follow_up_date=today,
+                updated_at=today,
+            ),
+        ]
+    )
+    captured_customers.clear()
+    page.type_filter_combo.setCurrentText("网店店群客户")
+    page.scope_filter_combo.setCurrentText(INTERNAL_ITEMS_SCOPE_FILTER)
+
+    assert page.displayed_customer_names() == []
+    assert page.displayed_follow_up_titles() == ["草莓主业 · 内部素材库整理"]
+    assert page.metric_value_labels["今天"].text() == "1"
+    assert page.filter_badge_label.text() == "筛选：内部主业 / 网店店群客户"
+
+    timeline_card = [widget for widget in page.findChildren(QFrame) if widget.objectName() == "TimelineCard"][0]
+    open_button = [button for button in timeline_card.findChildren(QPushButton) if button.objectName() == "TimelineOpenButton"][0]
+    open_button.click()
+
+    assert captured_customers == []
+    page.close()
+
+
+def test_overview_includes_active_internal_project_with_focus_but_no_schedule() -> None:
+    _app()
+    page = OverviewPage()
+    page.set_follow_up_projects(
+        [
+            ProjectRecord(
+                brand_customer_name="草莓主业",
+                project_name="2026-04 草莓客户管理系统录入助手优化",
+                stage="推进中",
+                year="2026",
+                project_type="主业系统建设",
+                current_focus="准备测试客户管理助手能否把非客户事项写入草莓主业项目。",
+                updated_at="2026-05-01",
+            )
+        ]
+    )
+
+    assert page.displayed_follow_up_titles() == ["草莓主业 · 2026-04 草莓客户管理系统录入助手优化"]
+    assert page.metric_value_labels["待排期"].text() == "1"
+    assert any(label.text() == "待排期" for label in page.findChildren(QLabel))
+    page.close()
+
+
 def test_overview_due_chip_click_emits_customer_reschedule_action() -> None:
     _app()
     page = OverviewPage()
@@ -186,7 +418,8 @@ def test_overview_due_chip_click_emits_customer_reschedule_action() -> None:
 
     timeline_card = [widget for widget in page.findChildren(QFrame) if widget.objectName() == "TimelineCardSelected"][0]
     due_chip = [button for button in timeline_card.findChildren(QPushButton) if button.objectName() == "TimelineDueChipButton"][0]
-    with patch("strawberry_customer_management.ui.pages.overview_page.QInputDialog.getText", return_value=("2026-05-03", True)):
+    _FakeRescheduleDialog.action = "reschedule:2026-05-03"
+    with patch("strawberry_customer_management.ui.pages.overview_page.FollowUpRescheduleDialog", _FakeRescheduleDialog):
         due_chip.click()
 
     assert captured == [("孤帆远影", "reschedule:2026-05-03")]
@@ -216,11 +449,25 @@ def test_overview_timeline_action_combo_can_open_reschedule_prompt_for_project()
 
     timeline_card = [widget for widget in page.findChildren(QFrame) if widget.objectName() == "TimelineCard"][0]
     action_combo = timeline_card.findChildren(QComboBox)[0]
-    with patch("strawberry_customer_management.ui.pages.overview_page.QInputDialog.getText", return_value=("", True)):
+    _FakeRescheduleDialog.action = "unschedule"
+    with patch("strawberry_customer_management.ui.pages.overview_page.FollowUpRescheduleDialog", _FakeRescheduleDialog):
         action_combo.activated.emit(2)
 
     assert captured == [("孙总", "2026-04 孙总AI商品图推广合作跟进", "unschedule")]
     assert action_combo.currentIndex() == 0
+
+
+def test_overview_reschedule_shortcuts_include_direct_choices() -> None:
+    shortcuts = _reschedule_shortcuts(date(2026, 4, 30))
+
+    assert shortcuts == [
+        ("今天", "2026-04-30"),
+        ("明天", "2026-05-01"),
+        ("后天", "2026-05-02"),
+        ("下周一", "2026-05-04"),
+        ("下周三", "2026-05-06"),
+        ("下周五", "2026-05-08"),
+    ]
 
 
 def test_overview_timeline_action_combo_keeps_customer_follow_up_actions() -> None:
@@ -274,7 +521,31 @@ def test_overview_timeline_action_combo_keeps_project_follow_up_actions() -> Non
 
     timeline_card = [widget for widget in page.findChildren(QFrame) if widget.objectName() == "TimelineCard"][0]
     action_combo = timeline_card.findChildren(QComboBox)[0]
-    action_combo.activated.emit(3)
+    action_combo.activated.emit(action_combo.findData("tomorrow"))
 
     assert captured == [("孙总", "2026-04 孙总AI商品图推广合作跟进", "tomorrow")]
+
+
+def test_overview_timeline_action_combo_can_set_customer_to_today_directly() -> None:
+    _app()
+    page = OverviewPage()
+    captured: list[tuple[str, str]] = []
+    page.customer_follow_up_action_requested.connect(lambda name, action: captured.append((name, action)))
+    page.set_customers(
+        [
+            CustomerRecord(
+                name="襄城县大茂网网络科技有限公司",
+                customer_type="网店店群客户",
+                stage="沟通中",
+                next_action="今天补齐授权复制和排查信息",
+                updated_at="2026-04-30",
+            )
+        ]
+    )
+
+    timeline_card = [widget for widget in page.findChildren(QFrame) if widget.objectName() == "TimelineCardSelected"][0]
+    action_combo = timeline_card.findChildren(QComboBox)[0]
+    action_combo.activated.emit(action_combo.findData("today"))
+
+    assert captured == [("襄城县大茂网网络科技有限公司", "today")]
     assert action_combo.currentIndex() == 0

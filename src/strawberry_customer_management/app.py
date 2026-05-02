@@ -18,6 +18,7 @@ def build_app() -> QApplication:
     if app is None:
         app = QApplication([])
     app.setApplicationName(APP_NAME)
+    app.setStyle("Fusion")
     app.setWindowIcon(load_app_icon())
     apply_theme(app)
     return app

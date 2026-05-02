@@ -16,7 +16,7 @@ def test_parses_copied_dingtalk_approval_text() -> None:
 发起时间：2026-04-21
 完成时间：2026-04-21 14:52
 审批通过
-当前节点：直属Owner"""
+当前节点：内部Owner"""
 
     entries = parse_dingtalk_approval_entries(raw_text, today="2026-04-23")
 
@@ -90,7 +90,7 @@ def test_falls_back_to_customer_pending_when_only_brand_is_clear() -> None:
 用印文件名称及用途说明：供应商：厦门市邱熊网络科技有限公司 品牌：爱慕股份有限公司 项目确认资料待补
 发起时间：2026-04-21
 审批中
-当前节点：业务Owner / tiger"""
+当前节点：业务Owner / 内部负责人B"""
     project = ProjectRecord(
         brand_customer_name="爱慕儿童",
         project_name="2026-04 爱慕儿童26年春夏短视频拍摄制作服务合同",
@@ -133,7 +133,7 @@ def test_falls_back_to_customer_pending_when_only_brand_is_clear() -> None:
     assert candidates[0].destination == CUSTOMER_DESTINATION
     assert candidates[0].customer_name == "爱慕儿童"
     assert candidates[0].project_name == ""
-    assert candidates[0].entry.current_node == "业务Owner / tiger"
+    assert candidates[0].entry.current_node == "业务Owner / 内部负责人B"
 
 
 def test_unmatched_approval_goes_to_unassigned_bucket() -> None:
@@ -169,10 +169,10 @@ def test_parses_dingtalk_pdf_form_as_one_approval_and_matches_project() -> None:
 附件（须上传电子文件） 邱熊2026确认单0306--曼妮芬棉质生活.docx
 公司名称 厦门稿定股份有限公司
 审批流程
-【直属Owner】 花茶 已同意 2026-04-21 13:25:33
-【业务Owner】 tiger 已同意 2026-04-21 13:26:44
-【印章审批人】 临光 已同意 2026-04-21 14:08:34
-【审批人】 兔子 已同意 2026-04-21 14:09:10
+【内部Owner】 内部负责人A 已同意 2026-04-21 13:25:33
+【业务Owner】 内部负责人B 已同意 2026-04-21 13:26:44
+【印章审批人】 法务A 已同意 2026-04-21 14:08:34
+【审批人】 审批人A 已同意 2026-04-21 14:09:10
 抄送阿豹,五花,彬彬 2026-04-21 14:09:10
 用钉钉扫码稿定(厦门)科技有限公司 创建时间：2026-04-21"""
     project = ProjectRecord(

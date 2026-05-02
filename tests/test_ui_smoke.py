@@ -6,13 +6,26 @@ import time
 
 from strawberry_customer_management.app import build_app
 from strawberry_customer_management.config import ConfigStore
-from strawberry_customer_management.models import ApprovalEntry, CommunicationEntry, CustomerDraft, PartyAInfo, ProjectDetail, ProjectDraft, ProjectRecord
+from strawberry_customer_management.models import (
+    ApprovalEntry,
+    CaptureDraft,
+    CommunicationEntry,
+    CustomerDraft,
+    INTERNAL_MAIN_WORK_NAME,
+    PartyAInfo,
+    ProjectDetail,
+    ProjectDraft,
+    PersonDetail,
+    PersonProjectLink,
+    ProjectRecord,
+)
 from strawberry_customer_management.markdown_store import MarkdownCustomerStore
 from strawberry_customer_management.models import CustomerDetail
 from strawberry_customer_management.models import CustomerRecord
 from strawberry_customer_management.project_store import MarkdownProjectStore
 from strawberry_customer_management.ui.pages.overview_page import OverviewPage
 from strawberry_customer_management.ui.pages.customer_library_page import CustomerLibraryPage
+from strawberry_customer_management.ui.pages.person_library_page import PersonLibraryPage
 from strawberry_customer_management.ui.pages.project_management_page import ProjectManagementPage
 from strawberry_customer_management.ui.pages.quick_capture_page import QuickCapturePage
 from strawberry_customer_management.ui.pages.settings_page import SettingsPage
@@ -42,7 +55,15 @@ def test_main_window_instantiates_with_empty_customer_root(tmp_path):
     window = MainWindow(config_store=config_store)
 
     assert window.windowTitle() == "草莓客户管理系统"
-    assert window.nav.count() == 5
+    assert window.nav.count() == 6
+    assert window._NAV_ITEMS == (
+        ("客户总览", "本周跟进"),
+        ("项目管理", "项目与审批"),
+        ("关系人库", "人员关系"),
+        ("客户库", "全部客户"),
+        ("快速录入", "新增与更新"),
+        ("设置", "系统配置"),
+    )
     window.close()
     app.processEvents()
 
@@ -130,6 +151,115 @@ def test_quick_capture_page_applies_ai_draft_to_form():
     assert page.need_edit.toPlainText() == "想确认批量购买是否有阶梯折扣"
     assert page.summary_edit.toPlainText() == "店群客户询价批量采购折扣"
     page.close()
+    app.processEvents()
+
+
+def test_person_library_page_emits_editable_person_draft() -> None:
+    app = build_app()
+    page = PersonLibraryPage()
+    detail = PersonDetail(
+        name="客户对接人A",
+        gender="待判断",
+        side="客户方",
+        organization="曼妮芬棉质生活",
+        brand="曼妮芬棉质生活",
+        common_relation="内容运营",
+        linked_customers=["曼妮芬棉质生活"],
+        linked_projects=["2026-03 曼妮芬棉质生活达人种草视频项目"],
+        project_links=[
+            PersonProjectLink(
+                customer_name="曼妮芬棉质生活",
+                project_name="2026-03 曼妮芬棉质生活达人种草视频项目",
+                side="客户方",
+                relation="内容运营",
+            )
+        ],
+        judgement="视频项目客户方运营对接人。",
+        relation_notes="- 2026-05-02：先按内容运营对接人沉淀。",
+    )
+    emitted = []
+    page.save_requested.connect(emitted.append)
+
+    page.show_person_detail(detail)
+    page.edit_button.click()
+    page.gender_edit.setCurrentText("女")
+    page.judgement_edit.setPlainText("曼妮芬视频线运营对接人。")
+    page.save_button.click()
+
+    assert emitted
+    assert emitted[0].name == "客户对接人A"
+    assert emitted[0].gender == "女"
+    assert emitted[0].judgement == "曼妮芬视频线运营对接人。"
+    assert emitted[0].linked_customers == ["曼妮芬棉质生活"]
+    assert emitted[0].project_links == detail.project_links
+    page.close()
+    app.processEvents()
+
+
+def test_quick_capture_page_applies_and_emits_internal_project_draft():
+    app = build_app()
+    page = QuickCapturePage()
+    captured: list[ProjectDraft] = []
+    page.save_requested.connect(captured.append)
+
+    page.apply_draft(
+        ProjectDraft(
+            brand_customer_name=INTERNAL_MAIN_WORK_NAME,
+            project_name="2026-04 新的主业相关系统",
+            stage="推进中",
+            project_type="主业系统建设",
+            current_focus="做一个新的主业相关系统",
+            next_action="明天继续推进",
+            next_follow_up_date="2026-05-01",
+        )
+    )
+    page._emit_save_requested()
+
+    assert page.name_edit.text() == "2026-04 新的主业相关系统"
+    assert page.type_combo.currentText() == "主业系统建设"
+    assert captured
+    assert captured[0].brand_customer_name == INTERNAL_MAIN_WORK_NAME
+    assert captured[0].project_name == "2026-04 新的主业相关系统"
+    assert captured[0].next_follow_up_date == "2026-05-01"
+    page.close()
+    app.processEvents()
+
+
+def test_main_window_ai_capture_and_save_internal_project_without_customer(tmp_path):
+    customer_root = tmp_path / "客户数据"
+    project_root = tmp_path / "项目数据"
+    customer_root.mkdir()
+    config_path = tmp_path / "config.json"
+    config_store = ConfigStore(config_path)
+    config_store.save(
+        {
+            "customer_root": str(customer_root),
+            "project_root": str(project_root),
+            "main_work_root": str(tmp_path / "主业"),
+        }
+    )
+    app = build_app()
+    window = MainWindow(config_store=config_store)
+
+    draft = ProjectDraft(
+        brand_customer_name=INTERNAL_MAIN_WORK_NAME,
+        project_name="新的主业相关系统",
+        stage="推进中",
+        project_type="主业系统建设",
+        current_focus="做一个新的主业相关系统",
+        next_action="明天继续推进",
+        next_follow_up_date="2026-05-01",
+    )
+    window._handle_ai_extract_success(CaptureDraft(kind="主业事项", project_draft=draft))
+    window._handle_capture_save(draft)
+
+    expected_project_name = f"{date.today():%Y-%m} 新的主业相关系统"
+    detail = window._project_store.get_project(INTERNAL_MAIN_WORK_NAME, expected_project_name)
+    assert detail.project_type == "主业系统建设"
+    assert detail.next_follow_up_date == "2026-05-01"
+    assert (project_root / "项目" / INTERNAL_MAIN_WORK_NAME / f"项目--{expected_project_name}.md").exists()
+    assert not (customer_root / f"客户--{INTERNAL_MAIN_WORK_NAME}.md").exists()
+    window.close()
     app.processEvents()
 
 
@@ -245,7 +375,7 @@ def test_project_management_page_uses_single_expand_panel_and_year_shortcuts():
                 entry_date="2026-04-21",
                 title_or_usage="MW1短视频拍摄合同确认",
                 approval_status="审批中",
-                current_node="业务Owner / tiger",
+                current_node="业务Owner / 内部负责人B",
             )
         ],
     )
@@ -265,8 +395,9 @@ def test_project_management_page_uses_single_expand_panel_and_year_shortcuts():
     labels = [label.text() for label in page.findChildren(QLabel)]
     assert any("MW1短视频拍摄合同" in text for text in labels)
     assert any("审批中" in text for text in labels)
-    assert len([button for button in page.findChildren(QPushButton) if button.text() == "收起详情"]) == 1
+    assert len([button for button in page.findChildren(QPushButton) if button.text() == "收起详情"]) >= 2
     assert len([button for button in page.findChildren(QPushButton) if button.text() == "查看项目"]) == 0
+    assert len([button for button in page.findChildren(QPushButton) if button.text() == "展开审批导入"]) == 1
     page.close()
     app.processEvents()
 
@@ -311,12 +442,12 @@ def test_main_window_imports_dingtalk_approval_into_project(tmp_path):
             stage="已合作",
             business_direction="视频拍摄 / 品牌合作",
             company="爱慕股份有限公司",
-            contact="李岩",
+            contact="甲方联系人A",
             current_need="推进春夏短视频项目",
             next_action="补充审批记录",
             party_a_brand="爱慕儿童",
             party_a_company="爱慕股份有限公司",
-            party_a_contact="李岩",
+            party_a_contact="甲方联系人A",
             communication=CommunicationEntry(entry_date="2026-04-21", summary="已有客户"),
         )
     )
@@ -333,7 +464,7 @@ def test_main_window_imports_dingtalk_approval_into_project(tmp_path):
             customer_page_link="[[客户/客户--爱慕儿童]]",
             main_work_path="/tmp/fake-aimer-project",
             path_status="主业路径失效",
-            default_party_a_info=PartyAInfo(brand="爱慕儿童", company="爱慕股份有限公司", contact="李岩"),
+            default_party_a_info=PartyAInfo(brand="爱慕儿童", company="爱慕股份有限公司", contact="甲方联系人A"),
         )
     )
     config_path = tmp_path / "config.json"
@@ -667,7 +798,7 @@ def test_overview_page_filters_customer_type_and_updates_metrics():
 
     assert page.displayed_customer_names() == ["青竹画材官方旗舰店"]
     assert page.metric_value_labels["待排期"].text() == "1"
-    assert page.filter_badge_label.text() == "筛选：网店KA客户"
+    assert page.filter_badge_label.text() == "筛选：全部事项 / 网店KA客户"
     page.close()
     app.processEvents()
 
@@ -937,7 +1068,7 @@ def test_overview_quick_capture_button_switches_to_capture_page(tmp_path):
 
     window.overview_page.quick_capture_button.click()
 
-    assert window.nav.currentRow() == 2
+    assert window.nav.currentRow() == window.QUICK_CAPTURE_ROW
     window.close()
     app.processEvents()
 
@@ -967,7 +1098,7 @@ def test_main_window_prepares_existing_customer_for_manual_edit(tmp_path):
 
     window._prepare_existing_customer_edit("爱慕")
 
-    assert window.nav.currentRow() == 2
+    assert window.nav.currentRow() == window.QUICK_CAPTURE_ROW
     assert window.quick_capture_page.name_edit.text() == "爱慕"
     assert window.quick_capture_page.target_customer_name == "爱慕"
     assert "手动编辑" in window.quick_capture_page.target_context_label.text()
@@ -1000,7 +1131,7 @@ def test_main_window_prepares_existing_customer_for_ai_update(tmp_path):
 
     window._prepare_existing_customer_update("爱慕")
 
-    assert window.nav.currentRow() == 2
+    assert window.nav.currentRow() == window.QUICK_CAPTURE_ROW
     assert window.quick_capture_page.name_edit.text() == "爱慕"
     assert window.quick_capture_page.type_combo.currentText() == "品牌客户"
     assert window.quick_capture_page.stage_combo.currentText() == "已合作"
@@ -1014,14 +1145,17 @@ def test_ai_extract_returns_immediately_while_worker_runs(tmp_path, monkeypatch)
         def __init__(self, **_kwargs):
             pass
 
-        def extract_draft(self, *_args, **_kwargs):
+        def extract_capture(self, *_args, **_kwargs):
             time.sleep(0.2)
-            return CustomerDraft(
-                name="爱慕",
-                customer_type="品牌客户",
-                stage="沟通中",
-                current_need="补充品牌推广需求",
-                communication=CommunicationEntry(entry_date="2026-04-20", summary="补充品牌推广需求"),
+            return CaptureDraft(
+                kind="客户更新",
+                customer_draft=CustomerDraft(
+                    name="爱慕",
+                    customer_type="品牌客户",
+                    stage="沟通中",
+                    current_need="补充品牌推广需求",
+                    communication=CommunicationEntry(entry_date="2026-04-20", summary="补充品牌推广需求"),
+                ),
             )
 
     monkeypatch.setattr("strawberry_customer_management.ui.main_window.MiniMaxCaptureClient", SlowClient)
@@ -1069,16 +1203,19 @@ def test_screenshot_ocr_populates_raw_text_and_ai_form(tmp_path, monkeypatch):
         def __init__(self, **_kwargs):
             pass
 
-        def extract_draft(self, *_args, **_kwargs):
-            return CustomerDraft(
-                name="爱慕",
-                customer_type="品牌客户",
-                stage="沟通中",
-                business_direction="视频拍摄 / 品牌推广",
-                contact="张三",
-                current_need="补充品牌推广视频拍摄需求",
-                next_action="确认预算和排期",
-                communication=CommunicationEntry(entry_date="2026-04-20", summary="继续推进品牌推广需求"),
+        def extract_capture(self, *_args, **_kwargs):
+            return CaptureDraft(
+                kind="客户更新",
+                customer_draft=CustomerDraft(
+                    name="爱慕",
+                    customer_type="品牌客户",
+                    stage="沟通中",
+                    business_direction="视频拍摄 / 品牌推广",
+                    contact="张三",
+                    current_need="补充品牌推广视频拍摄需求",
+                    next_action="确认预算和排期",
+                    communication=CommunicationEntry(entry_date="2026-04-20", summary="继续推进品牌推广需求"),
+                ),
             )
 
     monkeypatch.setattr("strawberry_customer_management.ui.main_window.McpOCRClient", FakeOCRClient)
@@ -1158,16 +1295,16 @@ def test_main_window_sync_projects_creates_project_pages_and_repairs_customer_pa
             customer_type="品牌客户",
             stage="已合作",
             business_direction="视频拍摄 / 品牌合作",
-            contact="李岩",
+            contact="甲方联系人A",
             company="爱慕股份有限公司",
             current_need="推进春夏短视频项目",
             next_action="继续补充后续项目需求",
             main_work_path=str(main_work_root / "品牌项目" / "品牌--爱慕") + "/",
             party_a_brand="爱慕儿童",
             party_a_company="爱慕股份有限公司",
-            party_a_contact="李岩",
-            party_a_phone="17778019272",
-            party_a_email="rellaliyan@aimer.com.cn",
+            party_a_contact="甲方联系人A",
+            party_a_phone="13800000000",
+            party_a_email="contact@example.com",
             party_a_address="北京市朝阳区望京开发区利泽中园2区218、219号楼爱慕大厦",
             communication=CommunicationEntry(entry_date="2026-04-21", summary="已有客户"),
         )
@@ -1213,7 +1350,7 @@ def test_overview_project_button_switches_to_project_management_page(tmp_path):
             customer_type="品牌客户",
             stage="已合作",
             business_direction="视频拍摄",
-            contact="李岩",
+            contact="甲方联系人A",
             current_need="推进新项目",
             next_action="查看全部项目",
             communication=CommunicationEntry(entry_date="2026-04-21", summary="已有客户"),
@@ -1232,7 +1369,7 @@ def test_overview_project_button_switches_to_project_management_page(tmp_path):
     )
     window.overview_page.view_projects_button.click()
 
-    assert window.nav.currentRow() == 3
+    assert window.nav.currentRow() == 1
     window.close()
     app.processEvents()
 
@@ -1258,6 +1395,6 @@ def test_overview_project_button_supports_shop_ka_customer(tmp_path):
     assert window.overview_page.view_projects_button.isEnabled()
     window.overview_page.view_projects_button.click()
 
-    assert window.nav.currentRow() == 3
+    assert window.nav.currentRow() == 1
     window.close()
     app.processEvents()

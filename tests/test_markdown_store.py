@@ -88,7 +88,7 @@ def write_seed_vault(root):
 - 对应公司：厦门市邱熊网络科技有限公司
 - 审批状态：审批中
 - 审批结果：--
-- 当前节点：业务Owner / tiger
+- 当前节点：业务Owner / 内部负责人B
 - 审批完成时间：--
 - 附件线索：2.26邱熊-爱慕股份有限公司策划项目确认单.docx
 - 备注：当前只能确认到爱慕品牌，具体项目待归位
@@ -191,20 +191,20 @@ def test_updates_customer_party_a_info_section(tmp_path):
             next_action="补充新业务需求",
             party_a_brand="爱慕儿童",
             party_a_company="爱慕股份有限公司",
-            party_a_contact="李岩",
-            party_a_phone="17778019272",
-            party_a_email="rellaliyan@aimer.com.cn",
+            party_a_contact="甲方联系人A",
+            party_a_phone="13800000000",
+            party_a_email="contact@example.com",
             party_a_address="北京市朝阳区望京开发区利泽中园2区218、219号楼爱慕大厦",
             communication=CommunicationEntry(entry_date="2026-04-21", summary="补录甲方收件信息"),
         )
     )
 
     assert detail.party_a_brand == "爱慕儿童"
-    assert detail.party_a_contact == "李岩"
+    assert detail.party_a_contact == "甲方联系人A"
     text = (tmp_path / "客户" / "客户--爱慕.md").read_text(encoding="utf-8")
     assert "## 甲方信息" in text
-    assert "- 收件联系人：李岩" in text
-    assert "- 电子邮箱：rellaliyan@aimer.com.cn" in text
+    assert "- 收件联系人：甲方联系人A" in text
+    assert "- 电子邮箱：contact@example.com" in text
 
 
 def test_appends_pending_customer_approval_without_losing_existing_data(tmp_path):
@@ -219,7 +219,7 @@ def test_appends_pending_customer_approval_without_losing_existing_data(tmp_path
             title_or_usage="爱慕补充确认单审批",
             counterparty="爱慕股份有限公司",
             approval_status="审批中",
-            current_node="直属Owner / 花茶",
+            current_node="内部Owner / 内部负责人A",
             note="补录到客户待归属审批",
         ),
     )
